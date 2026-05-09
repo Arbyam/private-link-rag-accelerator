@@ -56,6 +56,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "integration: marks tests that require deployed Azure resources",
+    "integration_invnet: requires in-VNet runner with real Azure deps (Cosmos, Search, OpenAI, Storage). Skipped unless RUN_INVNET_TESTS=1.",
     "isolation: marks tests verifying cross-user isolation (SC-011)",
 ]
 
