@@ -1,0 +1,22 @@
+# Next.js / Node build output
+.next/
+out/
+build/
+dist/
+
+# Dependencies
+node_modules/
+
+# Generated TypeScript metadata
+next-env.d.ts
+*.tsbuildinfo
+
+# Local env (do not commit secrets — use .env.example)
+.env
+.env.local
+.env.*.local
+
+# Test output
+coverage/
+playwright-report/
+test-results/
