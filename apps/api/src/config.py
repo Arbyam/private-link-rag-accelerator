@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # Identity / Entra
     AZURE_TENANT_ID: Annotated[str, Field(min_length=1)]
     AZURE_CLIENT_ID: Annotated[str, Field(min_length=1)]
+    # Optional override; when unset, the audience defaults to f"api://{AZURE_CLIENT_ID}"
+    # (matches the standard pattern for Entra "Expose an API" app registrations).
+    ENTRA_API_AUDIENCE: str | None = None
 
     # Cosmos DB
     COSMOS_ACCOUNT_ENDPOINT: Annotated[str, Field(min_length=1)]

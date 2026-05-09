@@ -1,0 +1,1 @@
+"""Service-layer integrations (auth, Cosmos, Search, AOAI, ...)."""

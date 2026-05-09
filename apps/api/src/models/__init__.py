@@ -18,7 +18,7 @@ from .conversation import Conversation, ConversationSummary
 from .document import DocumentIngestion, DocumentMeta, IngestionStatus
 from .error import Error
 from .turn import Turn, TurnRole
-from .user import Me, UserRole
+from .user import CurrentUser, Me, UserRole
 
 __all__ = [
     "AdminStats",
@@ -27,6 +27,7 @@ __all__ = [
     "CitationScope",
     "Conversation",
     "ConversationSummary",
+    "CurrentUser",
     "DocumentIngestion",
     "DocumentMeta",
     "Error",
