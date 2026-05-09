@@ -52,6 +52,17 @@
 - Warnings only: unused-params (expected — modules commented out) + use-safe-access (fixed with `[?key] ?? fallback`)
 - `use-safe-access` linter rule: prefer `obj[?key] ?? default` over `contains(obj, key) ? obj[key] : default`
 
+### Phase 2a — PR-E: registry module (T020) — 2026-05-08
+**PR #6 merged** (squash, auto-merge): `phase-2a/pr-e-registry-module` → `001-private-rag-accelerator`
+- AVM `br/public:avm/res/container-registry/registry:0.12.1` (latest stable; ACR registry has 28 versions on MCR, 0.12.1 selected as newest)
+- Pinned `acrSku` to Premium-only via `@allowed(['Premium'])` — codifies SC-004 (only PE-capable tier); guards against accidental SKU downgrade in param files
+- Zero-trust: `publicNetworkAccess: 'Disabled'`, `acrAdminUserEnabled: false`, `anonymousPullEnabled: false`
+- PE wiring shape: AVM expects `privateEndpoints[].privateDnsZoneGroup.privateDnsZoneGroupConfigs[].privateDnsZoneResourceId` — single zone `privatelink.azurecr.io`
+- Soft delete + retention both enabled, single `softDeleteRetentionDays` param (default 7) controls both windows
+- Outputs: `acrId`, `acrName`, `acrLoginServer`, `peId` (peId via `registry.outputs.privateEndpoints[0].resourceId`) — AcrPull RBAC deferred to PR-O wiring per scope discipline
+- Bicep build clean (`az bicep build` exit 0); only Bicep CLI upgrade nag warning
+- **Gotcha — parallel-agent branch collision:** `git checkout -b phase-2a/pr-e-registry-module` reportedly switched to that branch, but the *commit* landed on `phase-2a/pr-d-monitoring-module` because parallel Dallas spawns had pre-created sibling branches at the same base SHA. Recovered by `git reset --hard <base>` on the wrong branch + cherry-pick onto pr-e. Working tree was also intermittently swapped between branches across PowerShell sync sessions. **Mitigation for next PR:** verify `git branch --show-current` before AND after each commit, and consider using disposable worktrees (`git worktree add`) when squad is running multiple infra agents simultaneously.
+
 ### Phase 2a — PR-A.1: SKU defaults realigned to $500/mo ceiling — 2026-05-08
 **PR #4 merged** (squash, auto-merge): `phase-2a/pr-a1-sku-budget-defaults` → `001-private-rag-accelerator`
 - Defaults: apimSku=Developer, aiSearchSku=basic, cosmosCapacityMode=Serverless, budgetMonthlyUsd=500
