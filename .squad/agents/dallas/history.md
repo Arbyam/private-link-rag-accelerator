@@ -186,3 +186,18 @@ PR-E history already noted parallel-agent branch thrashing. This PR proved it: m
 
 #### Validation
 - `az bicep build --file infra/modules/network/main.bicep --outdir $env:TEMP\bicep-out` exits 0, **zero warnings**.
+
+
+### Phase 2a — PR-I: openai module (T025) — 2026-05-08
+**Branch:** `phase-2a/pr-i-openai` → `001-private-rag-accelerator`
+
+#### Module decisions
+- **AVM pin:** `avm/res/cognitive-services/account@0.13.2` (latest 0.13.x). 0.13.2 already applies `@batchSize(1)` to the deployments resource, so the OpenAI parallel-deploy 409 race is handled inside the AVM module — **no caller-side dependsOn chain is required**. Logged because the task brief flagged this as a known gotcha.
+- **Models** (per [research.md](../../../specs/001-private-rag-accelerator/research.md) D2 + plan.md, NOT the brief's `gpt-4o-mini` defaults): chat = `gpt-5` v `2025-08-07`, embeddings = `text-embedding-3-large` v `1` (3072 dims). Followed plan over brief because the brief explicitly said "if plan.md says otherwise, follow it."
+- **Deployment SKU:** `Standard` (region-locked). `GlobalStandard` would route across regions and conflict with strict Private Link semantics. Parameterised so production can opt in.
+- **Capacity:** 10 K TPM each (`capacity: 10`) — comfortable for demo, far below default quota.
+- **disableLocalAuth: true** + `customSubDomainName: name` (PE + token-auth requirement).
+- **Task ID note:** The brief said T024 but tasks.md has openai = T025 / search = T024. Used T025 in commit message.
+
+#### Validation
+- `az bicep build --file infra/modules/openai/main.bicep` exits 0, zero warnings.
