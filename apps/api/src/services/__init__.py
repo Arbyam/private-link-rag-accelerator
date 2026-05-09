@@ -1,1 +1,1 @@
-"""Backing-service clients (Cosmos, Search, Storage, AOAI, ...)."""
+"""Service layer (Azure SDK clients bound to managed identity)."""
