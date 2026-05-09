@@ -1,17 +1,23 @@
 # =============================================================================
 # infra/tests/run-all.ps1
 # =============================================================================
-# CI-friendly Pester runner for the static-analysis test suite.
-#   - Runs every test_*.ps1 under infra/tests
-#   - Exits 0 on full pass, 1 on any failure
-#   - Suitable for invocation from GitHub Actions / azd hooks
+# CI-friendly Pester runner for the STATIC analysis test suite (auth-free).
+#
+# Runtime tests (test_what_if_idempotent.ps1, test_teardown.ps1) require Azure
+# credentials and a paid subscription; they are NOT invoked here. Run those
+# directly via Invoke-Pester from the dedicated infra-runtime-tests workflow.
+#
+# Usage:
+#   ./run-all.ps1                  # static suite only (default)
+#   ./run-all.ps1 -IncludeRuntime  # also discover runtime tests (requires az login + envs)
 # =============================================================================
 
 [CmdletBinding()]
 param(
     [string] $TestPath = $PSScriptRoot,
     [string] $OutputFormat = 'NUnitXml',
-    [string] $ResultPath = $null
+    [string] $ResultPath = $null,
+    [switch] $IncludeRuntime
 )
 
 Set-StrictMode -Version Latest
@@ -37,14 +43,36 @@ try {
     exit 2
 }
 
-# --- Run -----------------------------------------------------------------------
-$testFiles = Get-ChildItem -Path $TestPath -Filter 'test_*.ps1' -File | Sort-Object Name
+# --- Discover the static suite -------------------------------------------------
+# The static suite is a curated allowlist — we explicitly enumerate the four
+# files this runner is responsible for, so adding a new test_*.ps1 (e.g., a
+# runtime test) doesn't accidentally enrol it in the PR-blocking suite.
+$staticFiles = @(
+    'test_compile.ps1'
+    'test_no_public_endpoints.ps1'
+    'test_no_shared_keys.ps1'
+    'test_dns_zones.ps1'
+)
+
+$testFiles = @()
+foreach ($name in $staticFiles) {
+    $f = Join-Path $TestPath $name
+    if (Test-Path $f) { $testFiles += (Get-Item $f) }
+}
+
+if ($IncludeRuntime) {
+    $extra = Get-ChildItem -Path $TestPath -Filter 'test_*.ps1' -File |
+        Where-Object { $_.Name -notin $staticFiles }
+    $testFiles += $extra
+}
+
 if ($testFiles.Count -eq 0) {
-    Write-Error "No test_*.ps1 files found in $TestPath"
+    Write-Error "No test files discovered under $TestPath"
     exit 2
 }
 
 Write-Host "[run-all] Pester version: $($pester.Version)" -ForegroundColor Cyan
+Write-Host "[run-all] Mode: $(if ($IncludeRuntime) {'static + runtime'} else {'static-only'})" -ForegroundColor Cyan
 Write-Host "[run-all] Discovered $($testFiles.Count) test file(s):" -ForegroundColor Cyan
 $testFiles | ForEach-Object { Write-Host "  - $($_.Name)" }
 
