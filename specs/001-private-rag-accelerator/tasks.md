@@ -78,6 +78,7 @@ Per [plan.md](./plan.md) "Project Structure":
 - [ ] T030 Wire `infra/main.bicep` to invoke modules in dependency order: network → identity → monitoring → registry/keyvault → storage/cosmos/search/openai/docintel → containerapps → bastion; outputs include resource IDs, internal FQDNs, and the printed UI URL
 - [ ] T031 Run `mcp_bicep_get_bicep_best_practices` and `mcp_bicep_list_avm_metadata`; refactor every module from T017–T028 to use AVM (`br/public:avm/*`) wherever an AVM exists at usable maturity; only the composition layer in `main.bicep` and accelerator-specific glue (e.g., AMPLS bundle, scope-RBAC fan-out) remain hand-rolled — per [plan.md](./plan.md) and [research.md](./research.md) D10
 - [ ] T032 [P] Author `infra/README.md` documenting every module, its parameters, its emitted outputs, and the AVM version pinned
+- [ ] T032a [P] Create `infra/modules/apim/main.bicep` provisioning Azure API Management Developer SKU with `virtualNetworkType: 'Internal'` (full VNet injection in `snet-apim`), system-assigned MI, NSG with required APIM management plane rules, TLS 1.0/1.1 disabled, and Application Insights diagnostic logging — per architecture decision 2026-05-08 (APIM-as-AI-gateway, SKU locked at Developer per $500/mo cost ceiling)
 
 ### Cross-cutting app foundations
 
