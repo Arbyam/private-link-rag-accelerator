@@ -1,0 +1,247 @@
+# ci.yml — Continuous Integration Workflow (T011)
+# Runs lint, type-check, unit tests, and Docker image builds on every PR to main.
+# Does NOT push images — deploy workflows handle that.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Python Linting & Type Checking (API + Ingest)
+  # ─────────────────────────────────────────────────────────────────────────────
+  lint-python:
+    name: Lint Python (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff lint
+        run: ruff check apps/api apps/ingest
+
+      - name: Run ruff format check
+        run: ruff format --check apps/api apps/ingest
+
+  typecheck-python:
+    name: Type Check Python (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install mypy
+          # Install type stubs and project deps if pyproject.toml exists
+          if [ -f apps/api/pyproject.toml ]; then
+            pip install -e apps/api[dev] || pip install -e apps/api || true
+          fi
+          if [ -f apps/ingest/pyproject.toml ]; then
+            pip install -e apps/ingest[dev] || pip install -e apps/ingest || true
+          fi
+
+      - name: Run mypy on API
+        run: mypy apps/api/src --ignore-missing-imports || true
+        continue-on-error: true  # Allow failure until types are fully annotated
+
+      - name: Run mypy on Ingest
+        run: mypy apps/ingest/src --ignore-missing-imports || true
+        continue-on-error: true
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # TypeScript Linting & Type Checking (Web)
+  # ─────────────────────────────────────────────────────────────────────────────
+  lint-typescript:
+    name: Lint TypeScript (eslint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile || pnpm install
+
+      - name: Run ESLint
+        run: pnpm lint || true
+        continue-on-error: true  # Allow failure until lint config is complete
+
+  typecheck-typescript:
+    name: Type Check TypeScript (tsc)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile || pnpm install
+
+      - name: Run TypeScript compiler
+        run: pnpm exec tsc --noEmit || true
+        continue-on-error: true
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Unit Tests
+  # ─────────────────────────────────────────────────────────────────────────────
+  test-python:
+    name: Test Python (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install API dependencies
+        run: |
+          if [ -f apps/api/pyproject.toml ]; then
+            pip install -e apps/api[dev] || pip install -e apps/api pytest pytest-asyncio || true
+          fi
+
+      - name: Install Ingest dependencies
+        run: |
+          if [ -f apps/ingest/pyproject.toml ]; then
+            pip install -e apps/ingest[dev] || pip install -e apps/ingest pytest pytest-asyncio || true
+          fi
+
+      - name: Run pytest (unit tests only)
+        run: |
+          pytest apps/api/tests -m "not integration" -v --tb=short || true
+          pytest apps/ingest/tests -m "not integration" -v --tb=short || true
+        continue-on-error: true  # Allow failure until tests exist
+
+  test-typescript:
+    name: Test TypeScript (vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile || pnpm install
+
+      - name: Run Vitest
+        run: pnpm test || true
+        continue-on-error: true  # Allow failure until tests exist
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Bicep Validation
+  # ─────────────────────────────────────────────────────────────────────────────
+  validate-bicep:
+    name: Validate Bicep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bicep
+        run: |
+          curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x ./bicep
+          sudo mv ./bicep /usr/local/bin/bicep
+          bicep --version
+
+      - name: Build Bicep templates
+        run: |
+          if [ -f infra/main.bicep ]; then
+            bicep build infra/main.bicep
+          else
+            echo "No main.bicep found yet — skipping build"
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Docker Image Builds (no push)
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-docker:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [api, ingest, web]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.app }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/${{ matrix.app }}
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: false
+          tags: private-rag-accelerator/${{ matrix.app }}:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        continue-on-error: true  # Allow failure until Dockerfiles exist
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Security Scanning
+  # ─────────────────────────────────────────────────────────────────────────────
+  security-scan:
+    name: Security Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
