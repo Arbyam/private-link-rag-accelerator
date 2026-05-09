@@ -1,0 +1,65 @@
+{
+  "name": "kb-index",
+  "fields": [
+    { "name": "id", "type": "Edm.String", "key": true, "filterable": true, "sortable": false, "facetable": false, "searchable": false, "retrievable": true },
+    { "name": "documentId", "type": "Edm.String", "filterable": true, "facetable": true, "searchable": false, "retrievable": true },
+    { "name": "scope", "type": "Edm.String", "filterable": true, "facetable": true, "searchable": false, "retrievable": true },
+    { "name": "userOid", "type": "Edm.String", "filterable": true, "facetable": false, "searchable": false, "retrievable": false },
+    { "name": "conversationId", "type": "Edm.String", "filterable": true, "facetable": false, "searchable": false, "retrievable": false },
+    { "name": "title", "type": "Edm.String", "filterable": true, "searchable": true, "retrievable": true, "analyzer": "en.microsoft" },
+    { "name": "content", "type": "Edm.String", "filterable": false, "searchable": true, "retrievable": true, "analyzer": "en.microsoft" },
+    {
+      "name": "contentVector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "retrievable": false,
+      "filterable": false,
+      "facetable": false,
+      "sortable": false,
+      "dimensions": 3072,
+      "vectorSearchProfile": "kb-hnsw-profile"
+    },
+    { "name": "page", "type": "Edm.Int32", "filterable": true, "sortable": true, "retrievable": true },
+    { "name": "chunkOrder", "type": "Edm.Int32", "filterable": true, "sortable": true, "retrievable": true },
+    { "name": "lastIndexedAt", "type": "Edm.DateTimeOffset", "filterable": true, "sortable": true, "retrievable": true }
+  ],
+  "vectorSearch": {
+    "algorithms": [
+      {
+        "name": "kb-hnsw",
+        "kind": "hnsw",
+        "hnswParameters": { "metric": "cosine", "m": 4, "efConstruction": 400, "efSearch": 500 }
+      }
+    ],
+    "profiles": [
+      {
+        "name": "kb-hnsw-profile",
+        "algorithm": "kb-hnsw",
+        "vectorizer": "kb-aoai-vectorizer"
+      }
+    ],
+    "vectorizers": [
+      {
+        "name": "kb-aoai-vectorizer",
+        "kind": "azureOpenAI",
+        "azureOpenAIParameters": {
+          "resourceUri": "https://<aoai-resource>.openai.azure.com",
+          "deploymentId": "text-embedding-3-large",
+          "modelName": "text-embedding-3-large",
+          "authIdentity": "managed-identity"
+        }
+      }
+    ]
+  },
+  "semantic": {
+    "configurations": [
+      {
+        "name": "kb-semantic",
+        "prioritizedFields": {
+          "titleField": { "fieldName": "title" },
+          "prioritizedContentFields": [{ "fieldName": "content" }]
+        }
+      }
+    ]
+  }
+}
