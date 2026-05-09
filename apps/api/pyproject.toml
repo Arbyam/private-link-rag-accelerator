@@ -43,6 +43,10 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "types-python-jose>=3.3.0",
+    # Contract tests parse contracts/api-openapi.yaml and validate
+    # request/response payloads against the OpenAPI schemas.
+    "pyyaml>=6.0",
+    "jsonschema>=4.21",
 ]
 
 [build-system]
