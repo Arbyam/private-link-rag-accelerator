@@ -22,7 +22,11 @@ dependencies = [
     
     # Observability
     "azure-monitor-opentelemetry>=1.6.0",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
     "structlog>=24.4.0",
+
+    # Multipart uploads (used in later phases for /uploads)
+    "python-multipart>=0.0.18",
     
     # Auth
     "python-jose[cryptography]>=3.3.0",

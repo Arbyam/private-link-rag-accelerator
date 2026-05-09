@@ -6,3 +6,12 @@
 .squad/.scratch/
 # Squad: SubSquad activation file (local to this machine)
 .squad-workstream
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
