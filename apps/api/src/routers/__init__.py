@@ -1,5 +1,5 @@
 """HTTP routers for the RAG API."""
 
-from . import health
+from . import admin, health
 
-__all__ = ["health"]
+__all__ = ["admin", "health"]
