@@ -45,6 +45,9 @@
       "value": false
     },
     "deployBastion": {
+      "value": false
+    },
+    "deployJumpbox": {
       "value": true
     },
     "enableZoneRedundancy": {
@@ -71,8 +74,8 @@
     "apimPublisherName": {
       "value": "RAG Accelerator"
     },
-    "cosmosAutoscaleMaxRu": {
-      "value": 1000
+    "cosmosCapacityMode": {
+      "value": "Serverless"
     },
     "budgetMonthlyUsd": {
       "value": 500
