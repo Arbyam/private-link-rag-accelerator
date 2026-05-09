@@ -1,4 +1,14 @@
 {
   "version": 1,
-  "defaultModel": "claude-opus-4.7"
+  "defaultModel": "claude-opus-4.7",
+  "modelPolicy": {
+    "code": "claude-opus-4.7",
+    "infra": "claude-opus-4.7",
+    "security-tests": "claude-opus-4.7",
+    "docs": "claude-haiku-4.5",
+    "canonicalization": "claude-haiku-4.5",
+    "readme-catalog": "claude-haiku-4.5",
+    "adr-authoring": "claude-haiku-4.5"
+  },
+  "modelPolicyNote": "Use Haiku 4.5 for prose/canonicalization spawns; Opus 4.7 for code, infra, and security-critical tests. User policy 2026-05-09."
 }
