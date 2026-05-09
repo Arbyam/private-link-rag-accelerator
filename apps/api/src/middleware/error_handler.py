@@ -58,6 +58,16 @@ class UnsupportedMediaType(AppError):
     code = "unsupported_media_type"
 
 
+class UpstreamRateLimitError(AppError):
+    status_code = 429
+    code = "rate_limited"
+
+
+class UpstreamError(AppError):
+    status_code = 503
+    code = "service_unavailable"
+
+
 def _error_response(
     *,
     status_code: int,
