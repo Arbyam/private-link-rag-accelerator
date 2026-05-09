@@ -44,7 +44,7 @@ metadata description = '''
 StorageV2 (Standard_LRS, Hot) with zero-trust posture, 3 containers, 1 queue,
 soft-delete, lifecycle policy on user-uploads, and an Event Grid system topic
 that streams shared-corpus blob events to a Storage Queue using CloudEvents 1.0.
-Built on AVM `avm/res/storage/storage-account` 0.27.1.
+Built on AVM `avm/res/storage/storage-account` 0.32.0.
 '''
 
 targetScope = 'resourceGroup'
@@ -115,10 +115,10 @@ var roleQueueDataReader = subscriptionResourceId(
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage Account (AVM)
 // Reference: https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/storage/storage-account
-// Pinned to 0.27.1.
+// Pinned to 0.32.0 (latest stable as of 2026-05-08; T031 audit bump).
 // ─────────────────────────────────────────────────────────────────────────────
 
-module storage 'br/public:avm/res/storage/storage-account:0.27.1' = {
+module storage 'br/public:avm/res/storage/storage-account:0.32.0' = {
   name: 'st-${uniqueString(name)}'
   params: {
     name: name

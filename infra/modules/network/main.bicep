@@ -16,7 +16,7 @@
 //
 // AVM USAGE
 //   - VNet, Subnets, NSGs              : hand-rolled (see README rationale)
-//   - Private DNS Zones + VNet links   : avm/res/network/private-dns-zone:0.7.1
+//   - Private DNS Zones + VNet links   : avm/res/network/private-dns-zone:0.8.1
 //
 // CONSUMERS
 //   - main.bicep (PR-O / T029 / T030) — uncomments the module call shown in the
@@ -572,7 +572,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
 // =============================================================================
 // registrationEnabled=false: we resolve PE A-records, not register VM hostnames.
 
-module privateDnsZones 'br/public:avm/res/network/private-dns-zone:0.7.1' = [for zoneName in privateDnsZoneNames: if (!customerProvidedDns) {
+module privateDnsZones 'br/public:avm/res/network/private-dns-zone:0.8.1' = [for zoneName in privateDnsZoneNames: if (!customerProvidedDns) {
   name: 'pdns-${uniqueString(deployment().name, zoneName)}'
   params: {
     name:     zoneName

@@ -1,7 +1,7 @@
 # `infra/modules/identity` — User-Assigned Managed Identities
 
 > **Task:** T018 (Phase 2a / PR-C)
-> **AVM module:** [`avm/res/managed-identity/user-assigned-identity`](https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/managed-identity/user-assigned-identity) `0.4.1`
+> **AVM module:** [`avm/res/managed-identity/user-assigned-identity`](https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/managed-identity/user-assigned-identity) `0.5.1`
 > **Owner:** Dallas (Infra)
 
 ## Purpose

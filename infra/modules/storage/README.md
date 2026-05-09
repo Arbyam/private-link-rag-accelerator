@@ -2,7 +2,7 @@
 
 Bicep module that provisions a zero-trust **Azure Storage Account (StorageV2 / Standard_LRS / Hot)** plus the Event-Grid-driven ingestion plumbing for the Private RAG Accelerator.
 
-Built on AVM `br/public:avm/res/storage/storage-account:0.27.1`. The Event Grid system topic + subscription are hand-rolled (no AVM coverage — see Ripley `phase-2-plan.md`).
+Built on AVM `br/public:avm/res/storage/storage-account:0.32.0`. The Event Grid system topic + subscription are hand-rolled (no AVM coverage — see Ripley `phase-2-plan.md`).
 
 > **History**: PR #12 (the original PR-G) closed only the storage-account skeleton. This module supersedes it and finishes the remaining T022 acceptance criteria (2 containers, soft-delete, lifecycle, Event Grid system topic + queue subscription).
 

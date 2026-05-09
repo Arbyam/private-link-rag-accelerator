@@ -2,7 +2,7 @@
 
 **Task:** T023 (Phase 2a / PR-H)
 **Owner:** Dallas
-**AVM module:** [`avm/res/document-db/database-account:0.15.1`](https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/document-db/database-account)
+**AVM module:** [`avm/res/document-db/database-account:0.16.0`](https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/document-db/database-account)
 
 Provisions an Azure Cosmos DB account for the Private RAG Accelerator's chat
 history, document metadata, and ingestion telemetry. Designed to the v3

@@ -1,7 +1,7 @@
 # `openai/` — Azure OpenAI (private endpoint + model deployments)
 
 **Task:** T025 — **PR:** PR-I (Phase 2a)
-**AVM:** [`avm/res/cognitive-services/account@0.13.2`](https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/cognitive-services/account)
+**AVM:** [`avm/res/cognitive-services/account@0.14.2`](https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/cognitive-services/account)
 
 ## What this module does
 
@@ -22,7 +22,7 @@ Standard deployments stay region-locked. GlobalStandard load-balances across reg
 
 ## Why no manual `dependsOn` chain on deployments
 
-Two `Microsoft.CognitiveServices/accounts/deployments` resources deployed in parallel race and one historically returns 409. AVM `0.13.2` already applies `@batchSize(1)` to the `deployments` resource, so the chain is enforced by the AVM module — we don't need to express it in this caller.
+Two `Microsoft.CognitiveServices/accounts/deployments` resources deployed in parallel race and one historically returns 409. AVM `0.14.2` already applies `@batchSize(1)` to the `deployments` resource, so the chain is enforced by the AVM module — we don't need to express it in this caller.
 
 ## Inputs
 
