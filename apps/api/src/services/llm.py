@@ -57,6 +57,90 @@ _log = get_logger(__name__)
 # current GA stable for chat completions + embeddings on Azure OpenAI.
 AZURE_OPENAI_API_VERSION = "2024-10-21"
 
+# ---------------------------------------------------------------------------
+# Grounding policy (FR-016, FR-017, FR-019) — T085
+# ---------------------------------------------------------------------------
+# The exact phrase the assistant must emit when retrieval is empty or all
+# scores fall below the confidence threshold. Exported so the chat router
+# and tests can match on it without duplicating the literal.
+DECLINE_PHRASE: str = "I don't have that information in the available documents."
+
+# Default system prompt enforcing FR-016 (per-claim citation) and FR-017
+# (explicit decline). Administrators may override this verbatim by writing a
+# `chat.systemPrompt` field into the Cosmos `settings` doc (FR-019).
+DEFAULT_SYSTEM_PROMPT: str = (
+    "You are a private knowledge assistant. Answer the user's question using "
+    "ONLY the provided passages. For every factual claim, cite at least one "
+    "passage by its index in square brackets, e.g. [1]. If the passages do "
+    "not contain the answer or your confidence is low, respond exactly with: "
+    f"'{DECLINE_PHRASE}' Do not speculate. Do not use general knowledge "
+    "outside the passages. Be concise."
+)
+
+# Cosmos location for the admin-editable settings singleton. Kept as
+# module-level constants (rather than env-driven) because the container
+# layout is fixed in infra; the *contents* are what admins edit.
+_SETTINGS_CONTAINER: str = "settings"
+_SETTINGS_DOC_ID: str = "global"
+_SETTINGS_PARTITION: str = "global"
+
+# Process-lifetime cache. None == not yet loaded. Use
+# `reset_system_prompt_cache()` in tests to bust between cases.
+_system_prompt_cache: dict[str, str] = {}
+
+
+def reset_system_prompt_cache() -> None:
+    """Clear the cached system prompt. Intended for tests only."""
+    _system_prompt_cache.clear()
+
+
+async def get_system_prompt(cosmos_client: Any) -> str:
+    """Return the admin-configured system prompt, or `DEFAULT_SYSTEM_PROMPT`.
+
+    Reads the singleton `settings/global` document from Cosmos and returns
+    its `chat.systemPrompt` field if present and non-empty. Falls back to
+    `DEFAULT_SYSTEM_PROMPT` on any of:
+
+      * settings container missing
+      * settings doc missing
+      * `chat.systemPrompt` absent / empty / not a string
+      * any Cosmos error (logged, never raised — the assistant must keep
+        running with the safe default rather than fail open)
+
+    Result is cached for the process lifetime; call
+    `reset_system_prompt_cache()` to force a re-read.
+    """
+    if "value" in _system_prompt_cache:
+        return _system_prompt_cache["value"]
+
+    prompt = DEFAULT_SYSTEM_PROMPT
+    try:
+        cfg = get_settings()
+        db = cosmos_client.get_database_client(cfg.COSMOS_DATABASE)
+        container = db.get_container_client(_SETTINGS_CONTAINER)
+        item = await container.read_item(
+            item=_SETTINGS_DOC_ID,
+            partition_key=_SETTINGS_PARTITION,
+        )
+        chat_section = item.get("chat") if isinstance(item, dict) else None
+        candidate = (
+            chat_section.get("systemPrompt") if isinstance(chat_section, dict) else None
+        )
+        if isinstance(candidate, str) and candidate.strip():
+            prompt = candidate
+            _log.info("llm.system_prompt.override_loaded", source="cosmos.settings")
+        else:
+            _log.info("llm.system_prompt.default_used", reason="field_missing_or_empty")
+    except Exception as exc:  # noqa: BLE001 — fall back to default on any failure
+        _log.info(
+            "llm.system_prompt.default_used",
+            reason="cosmos_lookup_failed",
+            error=type(exc).__name__,
+        )
+
+    _system_prompt_cache["value"] = prompt
+    return prompt
+
 # text-embedding-3-large native dimensionality.
 EMBEDDING_DIMENSIONS = 3072
 
@@ -314,7 +398,11 @@ def _translate_openai_error(exc: BaseException) -> AppError:
 
 __all__ = [
     "AZURE_OPENAI_API_VERSION",
+    "DECLINE_PHRASE",
+    "DEFAULT_SYSTEM_PROMPT",
     "EMBEDDING_DIMENSIONS",
     "ChatStreamEvent",
     "LLMService",
+    "get_system_prompt",
+    "reset_system_prompt_cache",
 ]
