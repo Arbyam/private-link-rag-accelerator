@@ -53,6 +53,7 @@ packages = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
     "integration: marks tests that require deployed Azure resources",
     "integration_invnet: requires in-VNet runner with real Azure deps (Cosmos, Search, OpenAI, Storage). Skipped unless RUN_INVNET_TESTS=1.",

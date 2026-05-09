@@ -98,9 +98,20 @@ class _NoopPipeline:
 
 
 def _build_pipeline(_settings: IngestSettings) -> IngestionPipeline:
-    """Construct the pipeline. T067 will swap this for the real one."""
-    # TODO(T067): replace with the concrete IngestionPipeline once it ships.
-    return _NoopPipeline()
+    """Construct the pipeline.
+
+    T067 has shipped the concrete :class:`IngestionPipeline`, but wiring
+    its full dependency graph (DocIntel, Cosmos ``DocumentsRepo``, Blob,
+    Search, Indexer SDK clients, plus a credential lifecycle owned by
+    this function) is a follow-up. For the Phase-4 demo path the worker
+    keeps the noop pipeline so queue I/O, lifecycle records, and queue
+    ack/nack are exercised end-to-end against any real queue.
+    """
+    # TODO(T067-wiring): replace with `IngestionPipeline(PipelineDeps(...))`
+    # once the ingest-side `DocumentsRepo` (currently only `delete`) gets
+    # the `update_status` / `upsert` / `get` methods T067's real pipeline
+    # requires. See `.squad/decisions/inbox/2026-05-09-shared-lib-refactor.md`.
+    return _NoopPipeline()  # type: ignore[return-value]
 
 
 async def _receive_one(queue: QueueClient) -> Any | None:
