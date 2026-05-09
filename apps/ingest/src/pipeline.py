@@ -113,26 +113,60 @@ ALLOWED_MIME_TYPES: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Document.ingestion.status alphabet (data-model.md §3 / §7).
+# Document.ingestion.status alphabet (data-model.md §3 / §7) — written to
+# Cosmos. Distinct from :data:`RunStatus` (the worker-facing terminal
+# status carried by :class:`RunOutcome`); ``RunOutcome.cosmos_status``
+# preserves the rich Cosmos state for callers that care.
 DocumentStatus = Literal[
     "queued", "cracking", "indexing", "indexed", "failed", "skipped", "deleted"
 ]
 
+# Worker-facing terminal status — matches the ``RunOutcome`` placeholder
+# shipped by T068 (``apps/ingest/src/handlers/shared.py``). Keep this
+# vocabulary stable; the handler boundary depends on it.
+RunStatus = Literal["succeeded", "failed", "skipped"]
 
-@dataclass(frozen=True, slots=True)
+
+@dataclass(frozen=True)
 class RunOutcome:
-    """Result of a single pipeline invocation. Never raises out of the
-    public ``process_*`` methods — every error is reflected here and on
-    the ``Document`` row.
+    """Result of a single pipeline invocation.
+
+    Compatible with the placeholder shipped by T068 (handlers expect
+    ``status``, ``document_id``, ``event_type``, ``message``). Extra
+    fields below are pipeline-specific telemetry that handlers may
+    ignore.
+
+    ``status`` is the **worker-facing** terminal status (succeeded /
+    failed / skipped). ``cosmos_status`` carries the richer
+    :data:`DocumentStatus` value the pipeline wrote to Cosmos
+    (``indexed`` / ``deleted`` / ``failed`` / ``skipped``) for tests and
+    observability.
+
+    The public ``process_*`` methods on :class:`IngestionPipeline` never
+    raise — every error path is reflected here and on the ``Document``
+    row in Cosmos.
     """
 
+    status: RunStatus
     document_id: str
-    status: DocumentStatus
-    skipped: bool = False
-    failed: bool = False
+    event_type: str | None = None
+    message: str | None = None
+    cosmos_status: DocumentStatus | None = None
     reason: ErrorReason | None = None
     passage_count: int | None = None
     indexer_run_id: str | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status == "succeeded"
+
+    @property
+    def failed(self) -> bool:
+        return self.status == "failed"
+
+    @property
+    def skipped(self) -> bool:
+        return self.status == "skipped"
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +215,7 @@ class PipelineInvariantError(Exception):
     """Raised when a defense-in-depth invariant is violated.
 
     These never escape the public ``process_*`` methods — they are caught,
-    logged, and reflected as ``RunOutcome(failed=True, ...)``.
+    logged, and reflected as ``RunOutcome(status="failed", ...)``.
     """
 
 
@@ -283,7 +317,9 @@ class IngestionPipeline:
     async def process_blob_created(
         self, blob_url: str, document_id: str
     ) -> RunOutcome:
-        return await self._process_create_or_change(blob_url, document_id)
+        return await self._process_create_or_change(
+            blob_url, document_id, event_type="Microsoft.Storage.BlobCreated"
+        )
 
     async def process_blob_changed(
         self, blob_url: str, document_id: str
@@ -291,7 +327,9 @@ class IngestionPipeline:
         # Same workflow as BlobCreated for shared corpus: re-run the indexer.
         # The skillset's change-tracking + the indexer's high-water mark
         # take care of incremental processing.
-        return await self._process_create_or_change(blob_url, document_id)
+        return await self._process_create_or_change(
+            blob_url, document_id, event_type="Microsoft.Storage.BlobChanged"
+        )
 
     async def process_blob_deleted(self, document_id: str) -> RunOutcome:
         """Delete passages from ``kb-index`` and tombstone the Document row.
@@ -315,8 +353,10 @@ class IngestionPipeline:
                     document_id, self.SHARED_SCOPE, "deleted"
                 )
             return RunOutcome(
+                status="succeeded",
                 document_id=document_id,
-                status="deleted",
+                event_type="Microsoft.Storage.BlobDeleted",
+                cosmos_status="deleted",
                 passage_count=len(passage_ids),
             )
         except Exception as exc:  # noqa: BLE001
@@ -324,9 +364,11 @@ class IngestionPipeline:
                 document_id, "upsert-failed", repr(exc)
             )
             return RunOutcome(
-                document_id=document_id,
                 status="failed",
-                failed=True,
+                document_id=document_id,
+                event_type="Microsoft.Storage.BlobDeleted",
+                message=repr(exc),
+                cosmos_status="failed",
                 reason="upsert-failed",
             )
 
@@ -335,7 +377,7 @@ class IngestionPipeline:
     # ------------------------------------------------------------------
 
     async def _process_create_or_change(
-        self, blob_url: str, document_id: str
+        self, blob_url: str, document_id: str, *, event_type: str
     ) -> RunOutcome:
         # Step 0: defensive blob URL validation.
         try:
@@ -345,14 +387,16 @@ class IngestionPipeline:
         except PipelineInvariantError as exc:
             await self._record_failure(document_id, "upsert-failed", str(exc))
             return RunOutcome(
-                document_id=document_id,
                 status="failed",
-                failed=True,
+                document_id=document_id,
+                event_type=event_type,
+                message=str(exc),
+                cosmos_status="failed",
                 reason="upsert-failed",
             )
 
         # Step 1: MIME + size pre-flight (T069).
-        preflight = await self._preflight(blob_url, document_id)
+        preflight = await self._preflight(blob_url, document_id, event_type)
         if preflight is not None:
             return preflight
 
@@ -364,7 +408,9 @@ class IngestionPipeline:
                 self._settings.SHARED_CORPUS_INDEXER
             )
         except Exception as exc:  # noqa: BLE001
-            return await self._fail(document_id, "embed-failed", repr(exc))
+            return await self._fail(
+                document_id, "embed-failed", repr(exc), event_type=event_type
+            )
 
         # Step 3: poll for completion (bounded).
         await self._set_status(document_id, "indexing")
@@ -373,21 +419,31 @@ class IngestionPipeline:
         except _IndexerTimeout:
             # Treat timeout as failure rather than hanging the worker.
             return await self._fail(
-                document_id, "embed-failed", "indexer poll timeout"
+                document_id,
+                "embed-failed",
+                "indexer poll timeout",
+                event_type=event_type,
             )
         except Exception as exc:  # noqa: BLE001
-            return await self._fail(document_id, "embed-failed", repr(exc))
+            return await self._fail(
+                document_id, "embed-failed", repr(exc), event_type=event_type
+            )
 
         if run_outcome.status == "failed":
             return await self._fail(
-                document_id, "embed-failed", run_outcome.error or "indexer failure"
+                document_id,
+                "embed-failed",
+                run_outcome.error or "indexer failure",
+                event_type=event_type,
             )
 
         # Step 4: success → indexed.
         await self._set_status(document_id, "indexed")
         return RunOutcome(
+            status="succeeded",
             document_id=document_id,
-            status="indexed",
+            event_type=event_type,
+            cosmos_status="indexed",
             passage_count=run_outcome.processed,
             indexer_run_id=run_outcome.run_id,
         )
@@ -397,7 +453,7 @@ class IngestionPipeline:
     # ------------------------------------------------------------------
 
     async def _preflight(
-        self, blob_url: str, document_id: str
+        self, blob_url: str, document_id: str, event_type: str
     ) -> RunOutcome | None:
         container, blob_name = _container_and_blob_from_url(blob_url)
         blob_client = self._deps.storage.get_blob_client(
@@ -411,9 +467,11 @@ class IngestionPipeline:
                 document_id, "upsert-failed", "blob not found at preflight"
             )
             return RunOutcome(
-                document_id=document_id,
                 status="failed",
-                failed=True,
+                document_id=document_id,
+                event_type=event_type,
+                message="blob not found at preflight",
+                cosmos_status="failed",
                 reason="upsert-failed",
             )
         except HttpResponseError as exc:
@@ -421,9 +479,11 @@ class IngestionPipeline:
                 document_id, "upsert-failed", f"preflight error: {exc!s}"
             )
             return RunOutcome(
-                document_id=document_id,
                 status="failed",
-                failed=True,
+                document_id=document_id,
+                event_type=event_type,
+                message=f"preflight error: {exc!s}",
+                cosmos_status="failed",
                 reason="upsert-failed",
             )
 
@@ -431,26 +491,28 @@ class IngestionPipeline:
         content_type = _extract_content_type(props)
 
         if content_type not in ALLOWED_MIME_TYPES:
-            await self._record_skip(
-                document_id, "unsupported-mime", f"content_type={content_type!r}"
-            )
+            detail = f"content_type={content_type!r}"
+            await self._record_skip(document_id, "unsupported-mime", detail)
             return RunOutcome(
-                document_id=document_id,
                 status="skipped",
-                skipped=True,
+                document_id=document_id,
+                event_type=event_type,
+                message=f"unsupported-mime: {detail}",
+                cosmos_status="skipped",
                 reason="unsupported-mime",
             )
 
         if size_bytes > self._settings.MAX_INGEST_BLOB_BYTES:
-            await self._record_skip(
-                document_id,
-                "oversize",
-                f"size_bytes={size_bytes} > cap={self._settings.MAX_INGEST_BLOB_BYTES}",
+            detail = (
+                f"size_bytes={size_bytes} > cap={self._settings.MAX_INGEST_BLOB_BYTES}"
             )
+            await self._record_skip(document_id, "oversize", detail)
             return RunOutcome(
-                document_id=document_id,
                 status="skipped",
-                skipped=True,
+                document_id=document_id,
+                event_type=event_type,
+                message=f"oversize: {detail}",
+                cosmos_status="skipped",
                 reason="oversize",
             )
 
@@ -548,13 +610,20 @@ class IngestionPipeline:
             )
 
     async def _fail(
-        self, document_id: str, reason: ErrorReason, detail: str
+        self,
+        document_id: str,
+        reason: ErrorReason,
+        detail: str,
+        *,
+        event_type: str | None = None,
     ) -> RunOutcome:
         await self._record_failure(document_id, reason, detail)
         return RunOutcome(
-            document_id=document_id,
             status="failed",
-            failed=True,
+            document_id=document_id,
+            event_type=event_type,
+            message=f"{reason}: {detail}",
+            cosmos_status="failed",
             reason=reason,
         )
 
@@ -724,11 +793,13 @@ def build_default_clients(
 __all__ = [
     "ALLOWED_MIME_TYPES",
     "DocIntelService",
+    "DocumentStatus",
     "DocumentsRepo",
     "ErrorReason",
     "IngestionPipeline",
     "PipelineDeps",
     "PipelineInvariantError",
     "RunOutcome",
+    "RunStatus",
     "build_default_clients",
 ]

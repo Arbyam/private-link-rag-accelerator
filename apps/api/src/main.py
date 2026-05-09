@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .middleware.error_handler import register_error_handlers
 from .middleware.logging import configure_logging, get_logger
 from .middleware.request_id import RequestIdMiddleware
-from .routers import health
+from .routers import admin, health
 
 API_TITLE = "Private RAG Accelerator API"
 API_VERSION = "0.1.0"
@@ -77,6 +77,7 @@ def create_app() -> FastAPI:
     register_error_handlers(app)
 
     app.include_router(health.router)
+    app.include_router(admin.router)
 
     # Instrument FastAPI with OTel only after routes are registered so the
     # instrumentor sees the full route tree.

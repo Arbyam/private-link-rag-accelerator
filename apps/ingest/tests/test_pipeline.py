@@ -166,8 +166,10 @@ async def test_happy_path_indexed() -> None:
     pipe, mocks = _make_deps()
     outcome = await pipe.process_blob_created(_GOOD_URL, _DOC_ID)
     assert isinstance(outcome, RunOutcome)
-    assert outcome.status == "indexed"
+    assert outcome.status == "succeeded"
+    assert outcome.cosmos_status == "indexed"
     assert outcome.failed is False and outcome.skipped is False
+    assert outcome.event_type == "Microsoft.Storage.BlobCreated"
     assert outcome.passage_count == 5
 
     # Indexer was triggered exactly once with the configured indexer name.
@@ -191,6 +193,7 @@ async def test_unsupported_mime_skipped() -> None:
     outcome = await pipe.process_blob_created(_GOOD_URL, _DOC_ID)
     assert outcome.skipped is True
     assert outcome.status == "skipped"
+    assert outcome.cosmos_status == "skipped"
     assert outcome.reason == "unsupported-mime"
 
     # Indexer was NOT triggered.
@@ -210,7 +213,8 @@ async def test_unsupported_mime_skipped() -> None:
 async def test_all_allowlisted_mimes_pass_preflight(mime: str) -> None:
     pipe, mocks = _make_deps(blob_props=_props(ct=mime))
     outcome = await pipe.process_blob_created(_GOOD_URL, _DOC_ID)
-    assert outcome.status == "indexed"
+    assert outcome.status == "succeeded"
+    assert outcome.cosmos_status == "indexed"
     mocks["indexer_client"].run_indexer.assert_awaited_once()
 
 
@@ -224,7 +228,8 @@ async def test_missing_content_type_rejected() -> None:
 async def test_content_type_with_charset_normalized() -> None:
     pipe, _ = _make_deps(blob_props=_props(ct="text/plain; charset=utf-8"))
     outcome = await pipe.process_blob_created(_GOOD_URL, _DOC_ID)
-    assert outcome.status == "indexed"
+    assert outcome.status == "succeeded"
+    assert outcome.cosmos_status == "indexed"
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +365,9 @@ async def test_blob_deleted_removes_passages_and_tombstones() -> None:
         search_hits=[{"id": "d_01J9ABCXYZ-0000"}, {"id": "d_01J9ABCXYZ-0001"}]
     )
     outcome = await pipe.process_blob_deleted(_DOC_ID)
-    assert outcome.status == "deleted"
+    assert outcome.status == "succeeded"
+    assert outcome.cosmos_status == "deleted"
+    assert outcome.event_type == "Microsoft.Storage.BlobDeleted"
     assert outcome.passage_count == 2
     mocks["search_client"].delete_documents.assert_awaited_once()
     args, kwargs = mocks["search_client"].delete_documents.await_args
@@ -374,7 +381,8 @@ async def test_blob_deleted_removes_passages_and_tombstones() -> None:
 async def test_blob_deleted_with_no_passages_still_tombstones() -> None:
     pipe, mocks = _make_deps(search_hits=[])
     outcome = await pipe.process_blob_deleted(_DOC_ID)
-    assert outcome.status == "deleted"
+    assert outcome.status == "succeeded"
+    assert outcome.cosmos_status == "deleted"
     assert outcome.passage_count == 0
     mocks["search_client"].delete_documents.assert_not_called()
 
@@ -402,7 +410,9 @@ async def test_blob_deleted_rejects_unsafe_document_id() -> None:
 async def test_blob_changed_runs_same_pipeline() -> None:
     pipe, mocks = _make_deps()
     outcome = await pipe.process_blob_changed(_GOOD_URL, _DOC_ID)
-    assert outcome.status == "indexed"
+    assert outcome.status == "succeeded"
+    assert outcome.cosmos_status == "indexed"
+    assert outcome.event_type == "Microsoft.Storage.BlobChanged"
     mocks["indexer_client"].run_indexer.assert_awaited_once()
 
 

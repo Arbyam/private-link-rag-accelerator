@@ -65,6 +65,10 @@ class Settings(BaseSettings):
 
     # Storage
     STORAGE_ACCOUNT_NAME: Annotated[str, Field(min_length=1)]
+    # Storage Queue that receives Event Grid blob events for the shared corpus.
+    # The same queue is the target for admin-triggered reindex CloudEvents
+    # (data-model.md §6 + infra/modules/storage/main.bicep `ingestionQueue`).
+    INGESTION_QUEUE_NAME: str = "ingestion-events"
 
     # Document Intelligence
     DOCINTEL_ENDPOINT: Annotated[str, Field(min_length=1)]
