@@ -1,0 +1,1 @@
+"""Service layer (Azure SDK clients bound to managed identity)."""
