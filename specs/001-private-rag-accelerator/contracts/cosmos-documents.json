@@ -1,0 +1,59 @@
+{
+  "id": "documents",
+  "partitionKey": {
+    "paths": ["/scope"],
+    "kind": "Hash",
+    "version": 2
+  },
+  "defaultTtl": -1,
+  "indexingPolicy": {
+    "indexingMode": "consistent",
+    "automatic": true,
+    "includedPaths": [{ "path": "/*" }],
+    "excludedPaths": [{ "path": "/_etag/?" }]
+  },
+  "documentJsonSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "Document",
+    "type": "object",
+    "required": ["id", "scope", "fileName", "mimeType", "sizeBytes", "blobUri", "ingestion"],
+    "properties": {
+      "id": { "type": "string", "pattern": "^d_[0-9A-HJKMNP-TV-Z]{26}$" },
+      "scope": { "type": "string", "pattern": "^(shared|user:oid:[0-9a-f-]{36})$" },
+      "parentConversationId": { "type": ["string", "null"] },
+      "uploadedByUserId": { "type": ["string", "null"] },
+      "fileName": { "type": "string", "maxLength": 512 },
+      "mimeType": {
+        "type": "string",
+        "enum": [
+          "application/pdf",
+          "text/plain",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          "image/png",
+          "image/jpeg",
+          "image/tiff"
+        ]
+      },
+      "sizeBytes": { "type": "integer", "minimum": 0, "maximum": 524288000 },
+      "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+      "blobUri": { "type": "string", "format": "uri" },
+      "ingestion": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "enum": ["queued", "cracking", "indexing", "indexed", "failed", "skipped"] },
+          "runId": { "type": "string" },
+          "startedAt": { "type": ["string", "null"], "format": "date-time" },
+          "completedAt": { "type": ["string", "null"], "format": "date-time" },
+          "passageCount": { "type": ["integer", "null"], "minimum": 0 },
+          "errorReason": { "type": ["string", "null"] },
+          "errorCode": { "type": ["string", "null"] }
+        }
+      },
+      "language": { "type": "string", "maxLength": 8 },
+      "ttl": { "type": ["integer", "null"], "minimum": 0 }
+    }
+  }
+}

@@ -1,0 +1,338 @@
+openapi: 3.1.0
+info:
+  title: Private RAG Accelerator API
+  version: 0.1.0
+  description: |
+    Backend HTTP API for the Private RAG Accelerator. All endpoints require an
+    Entra ID bearer token. Admin endpoints additionally require membership in
+    the configured admin group. The API is reachable only from inside the
+    deployed virtual network.
+
+servers:
+  - url: https://api.{internalDomain}
+    description: Container Apps internal ingress
+    variables:
+      internalDomain:
+        default: contoso-rag.internal
+
+security:
+  - entraBearer: []
+
+components:
+  securitySchemes:
+    entraBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Entra ID access token. `oid` claim binds the user.
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        details: { type: object, additionalProperties: true }
+
+    ConversationSummary:
+      type: object
+      required: [id, title, updatedAt]
+      properties:
+        id: { type: string, pattern: "^c_[0-9A-HJKMNP-TV-Z]{26}$" }
+        title: { type: string, maxLength: 200 }
+        updatedAt: { type: string, format: date-time }
+
+    Citation:
+      type: object
+      required: [passageId, documentId, scope, page]
+      properties:
+        passageId: { type: string }
+        documentId: { type: string }
+        scope:
+          type: string
+          enum: [shared, user]
+          description: |
+            "shared" = admin-curated corpus.
+            "user" = the caller's own uploaded document. Cross-user citations
+            cannot occur (enforced server-side; see SC-011).
+        page: { type: integer, minimum: 1 }
+        snippet: { type: string }
+        score: { type: number, format: float, minimum: 0, maximum: 1 }
+
+    Turn:
+      type: object
+      required: [turnId, role, content, createdAt]
+      properties:
+        turnId: { type: string }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+        citations:
+          type: array
+          items: { $ref: "#/components/schemas/Citation" }
+        createdAt: { type: string, format: date-time }
+
+    Conversation:
+      type: object
+      required: [id, title, createdAt, updatedAt, turns]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        turns:
+          type: array
+          items: { $ref: "#/components/schemas/Turn" }
+        uploadedDocumentIds:
+          type: array
+          items: { type: string }
+
+    DocumentMeta:
+      type: object
+      required: [id, scope, fileName, mimeType, sizeBytes, ingestion]
+      properties:
+        id: { type: string }
+        scope:
+          type: string
+          enum: [shared, user]
+        fileName: { type: string }
+        mimeType: { type: string }
+        sizeBytes: { type: integer, minimum: 0 }
+        ingestion:
+          type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [queued, cracking, indexing, indexed, failed, skipped]
+            startedAt: { type: string, format: date-time, nullable: true }
+            completedAt: { type: string, format: date-time, nullable: true }
+            passageCount: { type: integer, minimum: 0, nullable: true }
+            errorReason: { type: string, nullable: true }
+            errorCode: { type: string, nullable: true }
+
+    ChatRequest:
+      type: object
+      required: [conversationId, message]
+      properties:
+        conversationId:
+          type: string
+          description: Existing or freshly-created conversation id.
+        message: { type: string, maxLength: 8000 }
+        useUploads:
+          type: boolean
+          default: true
+          description: |
+            When true, retrieval considers the caller's uploaded documents in
+            this conversation in addition to the shared corpus.
+
+    AdminStats:
+      type: object
+      properties:
+        sharedDocuments: { type: integer }
+        sharedPassages: { type: integer }
+        totalConversations: { type: integer }
+        totalUsers: { type: integer }
+        chatRequests24h: { type: integer }
+        declineRate7d: { type: number, format: float }
+        lastIngestionRun:
+          type: object
+          nullable: true
+          properties:
+            id: { type: string }
+            status: { type: string }
+            startedAt: { type: string, format: date-time }
+            completedAt: { type: string, format: date-time, nullable: true }
+
+paths:
+
+  /healthz:
+    get:
+      summary: Liveness probe (unauthenticated, in-VNet only)
+      security: []
+      responses:
+        "200": { description: OK }
+
+  /me:
+    get:
+      summary: Return the current user's identity, role, and group membership
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [oid, displayName, role]
+                properties:
+                  oid: { type: string }
+                  displayName: { type: string }
+                  role: { type: string, enum: [user, admin] }
+                  groups:
+                    type: array
+                    items: { type: string }
+
+  /conversations:
+    get:
+      summary: List the caller's conversations (most-recent first)
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        - in: query
+          name: continuationToken
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ConversationSummary" }
+                  continuationToken: { type: string, nullable: true }
+    post:
+      summary: Create a new (empty) conversation; returns its id
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Conversation" }
+
+  /conversations/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    get:
+      summary: Get full conversation (including turns + citations)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Conversation" }
+        "404": { description: Not found or not owned by caller }
+    delete:
+      summary: |
+        Soft-delete the conversation. All associated user-uploaded documents
+        and AI Search passages are purged within 1 hour (SC-012).
+      responses:
+        "202": { description: Accepted; deletion in progress }
+
+  /chat:
+    post:
+      summary: Send a chat message and stream the assistant's grounded answer
+      description: |
+        Server-Sent Events stream. Events:
+          - `delta` — incremental token chunks
+          - `citations` — citation list once retrieval completes
+          - `done` — final usage + turnId + updatedConversation
+          - `error` — terminal error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatRequest" }
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE event stream
+
+  /uploads:
+    post:
+      summary: Upload a document to be grounded against in the current conversation only
+      description: |
+        Multipart upload. The document is scoped to the caller's identity AND
+        the parent conversation. It is NEVER added to the shared corpus and
+        is purged when the conversation is deleted or expires.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [conversationId, file]
+              properties:
+                conversationId: { type: string }
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "202":
+          description: Accepted; ingestion in progress
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentMeta" }
+        "413": { description: Document too large or per-conversation cap exceeded }
+        "415": { description: Unsupported media type }
+
+  /citations/{documentId}:
+    parameters:
+      - in: path
+        name: documentId
+        required: true
+        schema: { type: string }
+      - in: query
+        name: page
+        required: false
+        schema: { type: integer, minimum: 1 }
+    get:
+      summary: Stream the source document for a citation, in-context
+      description: |
+        Returns the original document. The API enforces that the caller can
+        only retrieve documents in scope `shared` or `user:<callerOid>`.
+        For PDFs, the response is the PDF binary; the UI navigates to the
+        cited page via `?page=N`. Image documents are returned as image bytes.
+      responses:
+        "200":
+          description: Document binary
+          content:
+            application/octet-stream: {}
+            application/pdf: {}
+            image/png: {}
+            image/jpeg: {}
+        "404": { description: Document not found or out of scope }
+
+  /admin/stats:
+    get:
+      summary: Operational dashboard stats (admin only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminStats" }
+        "403": { description: Caller is not in the admin group }
+
+  /admin/runs:
+    get:
+      summary: List recent ingestion runs (admin only)
+      parameters:
+        - in: query
+          name: scope
+          schema: { type: string, enum: [shared, user] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        "200":
+          description: OK
+        "403": { description: Caller is not in the admin group }
+
+  /admin/reindex:
+    post:
+      summary: Force a full re-ingestion of the shared corpus (admin only)
+      responses:
+        "202": { description: Accepted; run started }
+        "403": { description: Caller is not in the admin group }
