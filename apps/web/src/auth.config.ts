@@ -14,10 +14,10 @@ export const authConfig = {
   // Stateless JWTs — Container Apps web revisions are horizontally scaled
   // and we don't host a session DB.
   session: { strategy: 'jwt' },
-  // Auth.js routes
+  // Auth.js routes — custom pages live under the `(auth)` route group.
   pages: {
-    signIn: '/login',
-    error: '/login',
+    signIn: '/signin',
+    error: '/error',
   },
   // Edge-safe callbacks only. Node-only logic (group claim parsing, token
   // refresh) lives in `auth.ts`.
@@ -31,14 +31,17 @@ export const authConfig = {
       const { pathname } = request.nextUrl;
 
       // Public surfaces — explicitly allowed for unauthenticated users.
+      // FR-006: anonymous users are rejected from every other route.
       const isPublic =
-        pathname === '/' ||
-        pathname.startsWith('/login') ||
+        pathname.startsWith('/signin') ||
+        pathname.startsWith('/error') ||
         pathname.startsWith('/api/auth') ||
         pathname.startsWith('/_next') ||
         pathname.startsWith('/favicon');
 
       if (isPublic) return true;
+      // Returning `false` from `authorized` triggers a redirect to the
+      // configured `pages.signIn` with `callbackUrl` preserved.
       return isLoggedIn;
     },
   },
