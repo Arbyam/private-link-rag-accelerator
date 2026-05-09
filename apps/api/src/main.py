@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .middleware.error_handler import register_error_handlers
 from .middleware.logging import configure_logging, get_logger
 from .middleware.request_id import RequestIdMiddleware
-from .routers import admin, citations, conversations, health
+from .routers import admin, chat, citations, conversations, health
 
 API_TITLE = "Private RAG Accelerator API"
 API_VERSION = "0.1.0"
@@ -78,6 +78,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(admin.router)
+    app.include_router(chat.router)
     app.include_router(citations.router)
     app.include_router(conversations.router)
 
