@@ -184,29 +184,50 @@ def patched_jwks_client(
 
 
 _RUN_INVNET_ENV = "RUN_INVNET_TESTS"
+_RUN_OUTSIDEVNET_ENV = "RUN_OUTSIDEVNET_TESTS"
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the ``integration_invnet`` marker on every project that loads us."""
+    """Register the in/outside-VNet markers on every project that loads us."""
     config.addinivalue_line(
         "markers",
         "integration_invnet: requires in-VNet runner with real Azure deps "
         "(Cosmos, Search, OpenAI, Storage). Skipped unless RUN_INVNET_TESTS=1.",
+    )
+    config.addinivalue_line(
+        "markers",
+        "integration_outsidevnet: requires a public (out-of-VNet) runner; "
+        "asserts the deployed surface is unreachable from the public internet "
+        "(FR-004). Skipped unless RUN_OUTSIDEVNET_TESTS=1.",
     )
 
 
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Auto-skip ``integration_invnet`` tests outside the in-VNet runner."""
-    if os.environ.get(_RUN_INVNET_ENV) == "1":
-        return
-    skip = pytest.mark.skip(
+    """Auto-skip in/outside-VNet tests when their gate env var is not set.
+
+    Each marker gates independently — a test carrying both must have both
+    gate env vars set to actually run.
+    """
+    invnet_enabled = os.environ.get(_RUN_INVNET_ENV) == "1"
+    outsidevnet_enabled = os.environ.get(_RUN_OUTSIDEVNET_ENV) == "1"
+
+    skip_invnet = pytest.mark.skip(
         reason=f"integration_invnet test — set {_RUN_INVNET_ENV}=1 to run on in-VNet runner",
     )
+    skip_outsidevnet = pytest.mark.skip(
+        reason=(
+            f"integration_outsidevnet test — set {_RUN_OUTSIDEVNET_ENV}=1 to "
+            "run on a public (out-of-VNet) runner"
+        ),
+    )
+
     for item in items:
-        if "integration_invnet" in item.keywords:
-            item.add_marker(skip)
+        if "integration_invnet" in item.keywords and not invnet_enabled:
+            item.add_marker(skip_invnet)
+        if "integration_outsidevnet" in item.keywords and not outsidevnet_enabled:
+            item.add_marker(skip_outsidevnet)
 
 
 # ---------------------------------------------------------------------------
