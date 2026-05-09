@@ -37,6 +37,10 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
+    # Shared test fixtures (tests/_shared/fixtures.py) sign synthetic Entra
+    # JWTs to exercise the auth path future ingest endpoints will adopt.
+    "python-jose[cryptography]>=3.3.0",
+    "types-python-jose>=3.3.0",
 ]
 
 [build-system]
@@ -51,6 +55,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "integration: marks tests that require deployed Azure resources",
+    "integration_invnet: requires in-VNet runner with real Azure deps (Cosmos, Search, OpenAI, Storage). Skipped unless RUN_INVNET_TESTS=1.",
 ]
 
 [tool.ruff]
