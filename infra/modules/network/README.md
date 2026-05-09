@@ -96,7 +96,7 @@ References:
 
 | Resource                  | Source                                              | Why                                                                                                                          |
 |---------------------------|-----------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
-| Private DNS Zone + VNet link | **AVM** `br/public:avm/res/network/private-dns-zone:0.7.1` | Mature, simple wrapper, built-in `virtualNetworkLinks` array — exactly the shape we need. Reduces 13 + 13 boilerplate to one loop. |
+| Private DNS Zone + VNet link | **AVM** `br/public:avm/res/network/private-dns-zone:0.8.1` | Mature, simple wrapper, built-in `virtualNetworkLinks` array — exactly the shape we need. Reduces 13 + 13 boilerplate to one loop. |
 | VNet + Subnets            | **Hand-rolled** (`Microsoft.Network/virtualNetworks@2024-05-01`) | Subnets declared **inline** under the VNet (not as separate child resources) to avoid the well-known `AnotherOperationInProgress` race when 5 subnets deploy in parallel. AVM `virtual-network` produces correct subnets but its `subnets[*].networkSecurityGroupResourceId` shape adds extra indirection without buying us anything; inline is more transparent for review. |
 | NSGs                      | **Hand-rolled** (`Microsoft.Network/networkSecurityGroups@2024-05-01`) | Per-subnet rule sets are highly specific (APIM `:3443`, Bastion port matrix). AVM NSG works but our rules are clearer as-written and we own them anyway. |
 

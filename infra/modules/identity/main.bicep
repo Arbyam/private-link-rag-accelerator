@@ -47,7 +47,7 @@ param identityWebName string
 
 // ── Resources (AVM: avm/res/managed-identity/user-assigned-identity) ────────
 
-module miApi 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' = {
+module miApi 'br/public:avm/res/managed-identity/user-assigned-identity:0.5.1' = {
   name: 'uami-api'
   params: {
     name: identityApiName
@@ -56,7 +56,7 @@ module miApi 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' =
   }
 }
 
-module miIngest 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' = {
+module miIngest 'br/public:avm/res/managed-identity/user-assigned-identity:0.5.1' = {
   name: 'uami-ingest'
   params: {
     name: identityIngestName
@@ -65,7 +65,7 @@ module miIngest 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1
   }
 }
 
-module miWeb 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' = {
+module miWeb 'br/public:avm/res/managed-identity/user-assigned-identity:0.5.1' = {
   name: 'uami-web'
   params: {
     name: identityWebName

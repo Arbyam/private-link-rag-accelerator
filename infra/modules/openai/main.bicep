@@ -12,7 +12,7 @@
 //              embeddingDeploymentName.
 //
 // Notes:
-//   - AVM `cognitive-services/account` 0.13.2 already applies `@batchSize(1)`
+//   - AVM `cognitive-services/account` 0.14.2 already applies `@batchSize(1)`
 //     to the deployments resource, so the well-known OpenAI race where two
 //     `Microsoft.CognitiveServices/accounts/deployments` deploys collide is
 //     handled inside the AVM module — no extra `dependsOn` chain is needed in
@@ -101,12 +101,12 @@ param openAiUserPrincipalIds array = []
 // ─────────────────────────────────────────────────────────────────────────────
 // Cognitive Services account (AVM, kind: OpenAI)
 // Reference: https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/cognitive-services/account
-// Pinned to 0.13.2 (latest 0.13.x as of 2026-05-08). 0.13.2 applies
+// Pinned to 0.14.2 (latest stable as of 2026-05-08; T031 audit bump). 0.14.2 applies
 // @batchSize(1) to the deployments resource which serialises model
 // deployments and avoids the well-known parallel-deploy 409 race.
 // ─────────────────────────────────────────────────────────────────────────────
 
-module account 'br/public:avm/res/cognitive-services/account:0.13.2' = {
+module account 'br/public:avm/res/cognitive-services/account:0.14.2' = {
   name: 'aoai-${uniqueString(name)}'
   params: {
     name: name

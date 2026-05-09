@@ -48,7 +48,7 @@ param cognitiveServicesUserPrincipalIds array = []
 // Document Intelligence (AVM cognitive-services/account)
 // ─────────────────────────────────────────────────────────────────────────────
 
-module account 'br/public:avm/res/cognitive-services/account:0.13.0' = {
+module account 'br/public:avm/res/cognitive-services/account:0.14.2' = {
   name: 'docintel-${uniqueString(name)}'
   params: {
     name: name

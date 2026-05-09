@@ -73,9 +73,12 @@ param dataContributorPrincipalIds array = []
 // -----------------------------------------------------------------------------
 // AVM: Cosmos DB account
 // Reference: https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/document-db/database-account
-// Version pinned to 0.15.1 (latest 0.15.x as of 2026-05-08).
+// Version pinned to 0.16.0 (T031 audit bump from 0.15.1). 0.17.0+ removed the
+// `sqlDatabases` parameter (containers must be authored as standalone resources)
+// and renamed `automaticFailover` → `enableAutomaticFailover` — both breaking
+// for this module's contract; held back until a follow-up refactor PR.
 // -----------------------------------------------------------------------------
-module account 'br/public:avm/res/document-db/database-account:0.15.1' = {
+module account 'br/public:avm/res/document-db/database-account:0.16.0' = {
   name: 'cosmos-${uniqueString(name)}'
   params: {
     name: name
