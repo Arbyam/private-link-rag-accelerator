@@ -76,6 +76,15 @@ param pdnsQueueId string
 @description('Resource ID of the Log Analytics workspace receiving diagnostic logs.')
 param lawId string
 
+@description('Principal IDs that receive `Storage Blob Data Contributor` on this account (write to shared-corpus / user-uploads). Wired by PR-O / T029 — typically the ingest UAMI.')
+param blobContributorPrincipalIds array = []
+
+@description('Principal IDs that receive `Storage Blob Data Reader` on this account (read corpora). Wired by PR-O / T029 — typically the api UAMI.')
+param blobReaderPrincipalIds array = []
+
+@description('Principal IDs that receive `Storage Queue Data Reader` on this account (KEDA scaler queue depth). Wired by PR-O / T029 — typically the ingest UAMI.')
+param queueReaderPrincipalIds array = []
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,6 +102,14 @@ var roleQueueDataMessageSender = subscriptionResourceId(
 var roleBlobDataContributor = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
   'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+)
+var roleBlobDataReader = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
+)
+var roleQueueDataReader = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '19e7f393-937e-4f77-808e-94535e297925'
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -374,6 +391,44 @@ resource sharedCorpusSubscription 'Microsoft.EventGrid/systemTopics/eventSubscri
     ingestionQueueRes
   ]
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RBAC for app UAMIs (T029 / PR-O) — fan-out to the per-app principal IDs
+// supplied by the wiring layer. All assignments scoped to the storage account.
+//   - Blob Data Contributor → ingest (write to shared-corpus / user-uploads)
+//   - Blob Data Reader      → api    (read corpora when answering)
+//   - Queue Data Reader     → ingest (KEDA scaler reads queue depth via MI)
+// ─────────────────────────────────────────────────────────────────────────────
+
+resource raAppBlobContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in blobContributorPrincipalIds: {
+  scope: sa
+  name: guid(sa.id, principalId, 'BlobDataContributor')
+  properties: {
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleBlobDataContributor
+  }
+}]
+
+resource raAppBlobReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in blobReaderPrincipalIds: {
+  scope: sa
+  name: guid(sa.id, principalId, 'BlobDataReader')
+  properties: {
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleBlobDataReader
+  }
+}]
+
+resource raAppQueueReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in queueReaderPrincipalIds: {
+  scope: sa
+  name: guid(sa.id, principalId, 'QueueDataReader')
+  properties: {
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleQueueDataReader
+  }
+}]
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Outputs — consumed by PR-O wiring layer

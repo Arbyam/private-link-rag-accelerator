@@ -41,6 +41,9 @@ param lawId string
 ])
 param sku string = 'S0'
 
+@description('Principal IDs that receive `Cognitive Services User` on this account (call analyze endpoints). Wired by PR-O / T029 — typically api + ingest UAMIs.')
+param cognitiveServicesUserPrincipalIds array = []
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Document Intelligence (AVM cognitive-services/account)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -105,6 +108,31 @@ module account 'br/public:avm/res/cognitive-services/account:0.13.0' = {
     ]
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RBAC — Cognitive Services User (T029 / PR-O)
+// ─────────────────────────────────────────────────────────────────────────────
+var roleCognitiveServicesUser = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  'a97b65f3-24c7-4388-baec-2e87135dc908'
+)
+
+resource diExisting 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
+  name: name
+  dependsOn: [
+    account
+  ]
+}
+
+resource raCognitiveServicesUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in cognitiveServicesUserPrincipalIds: {
+  scope: diExisting
+  name: guid(diExisting.id, principalId, 'CognitiveServicesUser')
+  properties: {
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleCognitiveServicesUser
+  }
+}]
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Outputs

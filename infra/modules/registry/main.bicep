@@ -44,6 +44,9 @@ param privateDnsZoneId string
 @maxValue(90)
 param softDeleteRetentionDays int = 7
 
+@description('Principal IDs (UAMI / SPN object IDs) that receive `AcrPull` on this registry. Empty array = no role assignments emitted by this module. Wired by PR-O / T029.')
+param acrPullPrincipalIds array = []
+
 // =============================================================================
 // AVM: Container Registry
 // Reference: https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/container-registry/registry
@@ -85,6 +88,34 @@ module registry 'br/public:avm/res/container-registry/registry:0.12.1' = {
     ]
   }
 }
+
+// =============================================================================
+// RBAC — AcrPull to per-app UAMIs (T029 / PR-O)
+// =============================================================================
+// Built-in role IDs are subscription-scoped. The role assignment itself is
+// scoped to the registry resource, so each app MI can pull only from THIS ACR.
+// =============================================================================
+var roleAcrPull = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '7f951dda-4ed3-11e8-95a1-9c5dac3a2c3e'
+)
+
+resource acrExisting 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
+  name: acrName
+  dependsOn: [
+    registry
+  ]
+}
+
+resource raAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in acrPullPrincipalIds: {
+  scope: acrExisting
+  name: guid(acrExisting.id, principalId, 'AcrPull')
+  properties: {
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleAcrPull
+  }
+}]
 
 // =============================================================================
 // Outputs — consumed by PR-O (T029/T030) wiring layer:

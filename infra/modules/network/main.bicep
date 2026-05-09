@@ -457,6 +457,40 @@ resource nsgApim 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
           destinationPortRange:     '*'
         }
       }
+      {
+        // APIM internal-mode dependency: gateway uses an internal SQL DB
+        // for configuration storage. Required by Microsoft's published
+        // network reference for VNet-injected APIM. Flagged by dallas-apim
+        // README (PR #16).
+        name: 'AllowOutboundSqlForApim'
+        properties: {
+          priority:                 200
+          direction:                'Outbound'
+          access:                   'Allow'
+          protocol:                 'Tcp'
+          sourceAddressPrefix:      'VirtualNetwork'
+          sourcePortRange:          '*'
+          destinationAddressPrefix: 'Sql'
+          destinationPortRange:     '1433'
+        }
+      }
+      {
+        // APIM internal-mode dependency: diagnostics + telemetry stream
+        // to an internal Event Hub on AMQP (5671/5672) and HTTPS (443).
+        // Required by Microsoft's published network reference for
+        // VNet-injected APIM. Flagged by dallas-apim README (PR #16).
+        name: 'AllowOutboundEventHubForApim'
+        properties: {
+          priority:                 210
+          direction:                'Outbound'
+          access:                   'Allow'
+          protocol:                 'Tcp'
+          sourceAddressPrefix:      'VirtualNetwork'
+          sourcePortRange:          '*'
+          destinationAddressPrefix: 'EventHub'
+          destinationPortRanges:    ['5671', '5672', '443']
+        }
+      }
     ]
   }
 }

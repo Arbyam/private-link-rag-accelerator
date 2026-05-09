@@ -46,6 +46,12 @@ param aoaiResourceId string
 @description('Resource ID of the Storage Account that AI Search indexers will reach via shared private link (groupId `blob`).')
 param storageBlobResourceId string
 
+@description('Principal IDs that receive `Search Index Data Contributor` on this service (write/update indexes + documents). Wired by PR-O / T029 — typically the ingest UAMI.')
+param indexContributorPrincipalIds array = []
+
+@description('Principal IDs that receive `Search Index Data Reader` on this service (query indexes only). Wired by PR-O / T029 — typically the api UAMI.')
+param indexReaderPrincipalIds array = []
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AI Search (AVM)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -135,6 +141,45 @@ module search 'br/public:avm/res/search/search-service:0.12.1' = {
     ]
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RBAC — Search Index Data Contributor / Reader (T029 / PR-O)
+// ─────────────────────────────────────────────────────────────────────────────
+var roleSearchIndexDataContributor = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
+)
+var roleSearchIndexDataReader = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '1407120a-92aa-4202-b7e9-c0e197c71c8f'
+)
+
+resource searchExisting 'Microsoft.Search/searchServices@2024-06-01-preview' existing = {
+  name: name
+  dependsOn: [
+    search
+  ]
+}
+
+resource raSearchIndexContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in indexContributorPrincipalIds: {
+  scope: searchExisting
+  name: guid(searchExisting.id, principalId, 'SearchIndexDataContributor')
+  properties: {
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleSearchIndexDataContributor
+  }
+}]
+
+resource raSearchIndexReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in indexReaderPrincipalIds: {
+  scope: searchExisting
+  name: guid(searchExisting.id, principalId, 'SearchIndexDataReader')
+  properties: {
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleSearchIndexDataReader
+  }
+}]
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Outputs

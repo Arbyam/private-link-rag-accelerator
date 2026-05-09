@@ -95,6 +95,9 @@ param embeddingCapacity int = 10
 ])
 param deploymentSku string = 'Standard'
 
+@description('Principal IDs that receive `Cognitive Services OpenAI User` on this account (call chat / embedding deployments). Wired by PR-O / T029 — typically api + ingest UAMIs.')
+param openAiUserPrincipalIds array = []
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Cognitive Services account (AVM, kind: OpenAI)
 // Reference: https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/cognitive-services/account
@@ -190,6 +193,31 @@ module account 'br/public:avm/res/cognitive-services/account:0.13.2' = {
     ]
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RBAC — Cognitive Services OpenAI User (T029 / PR-O)
+// ─────────────────────────────────────────────────────────────────────────────
+var roleCogSvcsOpenAiUser = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
+)
+
+resource aoaiExisting 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
+  name: name
+  dependsOn: [
+    account
+  ]
+}
+
+resource raOpenAiUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in openAiUserPrincipalIds: {
+  scope: aoaiExisting
+  name: guid(aoaiExisting.id, principalId, 'CognitiveServicesOpenAIUser')
+  properties: {
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleCogSvcsOpenAiUser
+  }
+}]
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Outputs — consumed by PR-O (T029) wiring layer:

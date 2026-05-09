@@ -55,7 +55,8 @@ param environmentName string = 'dev'
 @description('Object ID of the Entra ID security group granted admin RBAC on Key Vault, AI Search, Cosmos DB, and Azure OpenAI.')
 param adminGroupObjectId string
 
-@description('Optional list of Entra ID group object IDs granted read/chat access to the RAG application. Leave empty to allow all authenticated users.')
+@description('Optional list of Entra ID group object IDs granted read/chat access to the RAG application. Leave empty to allow all authenticated users. Consumed by Phase 3 access policy (PR-S+).')
+#disable-next-line no-unused-params
 param allowedUserGroupObjectIds array = []
 
 @description('Cost-center tag value applied to every resource for FinOps chargeback reporting.')
@@ -99,10 +100,12 @@ param deployBastion bool = false
 @description('Deploy a Linux jumpbox VM (Ubuntu 24.04, Standard_B2s) in snet-pe for in-VNet console / smoke-test access. ~$36/mo when running, $0 when deallocated. Default true per Phase 2a v3 plan — required because internal-only ingress blocks GitHub-runner curl.')
 param deployJumpbox bool = true
 
-@description('Enable availability-zone redundancy on resources that support it (Storage, Cosmos DB, ACR, etc.). Increases cost; recommended for prod.')
+@description('Enable availability-zone redundancy on resources that support it (Storage, Cosmos DB, ACR, etc.). Increases cost; recommended for prod. Currently locked OFF in modules per Phase 2a v3 cost plan; surfaced here for Phase 2b zone-redundant variants.')
+#disable-next-line no-unused-params
 param enableZoneRedundancy bool = false
 
-@description('Enable Customer-Managed Key encryption on Cosmos DB, Storage, and Azure OpenAI via Key Vault. Requires Key Vault to be healthy before CMK resources deploy.')
+@description('Enable Customer-Managed Key encryption on Cosmos DB, Storage, and Azure OpenAI via Key Vault. Requires Key Vault to be healthy before CMK resources deploy. Surfaced here for Phase 2b CMK variants; not yet wired.')
+#disable-next-line no-unused-params
 param enableCustomerManagedKey bool = false
 
 // ── AI / Cognitive Services ──────────────────────────────────────────────────
@@ -115,12 +118,14 @@ param embeddingModel string = 'text-embedding-3-large'
 
 // ── SKUs ─────────────────────────────────────────────────────────────────────
 
-@description('Azure AI Search SKU. Default "basic" per Phase 2a v3 budget plan (~$74/mo, supports private endpoints, 15 GB / 3 indexes — sufficient for demo). Use "standard" or higher for production vector/hybrid search workloads.')
+@description('Azure AI Search SKU. Default "basic" per Phase 2a v3 budget plan (~$74/mo, supports private endpoints, 15 GB / 3 indexes — sufficient for demo). Use "standard" or higher for production vector/hybrid search workloads. Locked at "basic" inside modules/search; surfaced here as a knob for Phase 2b.')
 @allowed(['free', 'basic', 'standard', 'standard2', 'standard3'])
+#disable-next-line no-unused-params
 param aiSearchSku string = 'basic'
 
-@description('Azure API Management SKU. Default "Developer" per Phase 2a v3 budget plan (~$50/mo, internal VNet mode, no SLA — acceptable for demo). "Premium" (~$2,800/mo) required only for production SLA + multi-region. StandardV2 is disqualified — it cannot run fully internal (violates SC-004).')
+@description('Azure API Management SKU. Default "Developer" per Phase 2a v3 budget plan (~$50/mo, internal VNet mode, no SLA — acceptable for demo). "Premium" (~$2,800/mo) required only for production SLA + multi-region. StandardV2 is disqualified — it cannot run fully internal (violates SC-004). Locked at "Developer" inside modules/apim; surfaced here as a knob for Phase 2b.')
 @allowed(['Developer', 'Premium'])
+#disable-next-line no-unused-params
 param apimSku string = 'Developer'
 
 @description('APIM publisher e-mail address. Displayed in the developer portal and used for system notifications. Override per environment in the parameter file.')
@@ -134,13 +139,24 @@ param apimPublisherName string = 'RAG Accelerator'
 
 // ── Cost & Budget ────────────────────────────────────────────────────────────
 
-@description('Cosmos DB capacity mode. Default "Serverless" per Phase 2a v3 budget plan (~$3/mo for demo workload, pay-per-RU, no minimum). Use "Provisioned" for predictable production throughput with autoscale.')
+@description('Cosmos DB capacity mode. Default "Serverless" per Phase 2a v3 budget plan (~$3/mo for demo workload, pay-per-RU, no minimum). Use "Provisioned" for predictable production throughput with autoscale. Locked at "Serverless" inside modules/cosmos; surfaced here as a knob for Phase 2b.')
 @allowed(['Serverless', 'Provisioned'])
+#disable-next-line no-unused-params
 param cosmosCapacityMode string = 'Serverless'
 
-@description('Monthly spend threshold in USD. A budget alert fires when actual spend reaches 100% of this value. Default 500 per Phase 2a v3 hard ceiling — total estimated demo cost is ~$318/mo with 36% headroom.')
+@description('Monthly spend threshold in USD. A budget alert fires when actual spend reaches 100% of this value. Default 500 per Phase 2a v3 hard ceiling — total estimated demo cost is ~$318/mo with 36% headroom. Wired by a follow-up budget module (out of scope for PR-O).')
 @minValue(100)
+#disable-next-line no-unused-params
 param budgetMonthlyUsd int = 500
+
+// ── Operations ───────────────────────────────────────────────────────────────
+
+@description('SSH public key (single line, e.g. `ssh-rsa AAAA…`) for the Linux jumpbox admin user. Only consumed when deployJumpbox=true (or deployBastion=true). Replace the placeholder before deployment.')
+@secure()
+param jumpboxAdminPublicKey string = ''
+
+@description('Linux admin username for the jumpbox VM.')
+param jumpboxAdminUsername string = 'azureuser'
 
 // =============================================================================
 // VARIABLES — Naming, tags, derived values
@@ -228,312 +244,380 @@ resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
 }
 
 // =============================================================================
-// MODULE CALL PLACEHOLDERS
+// MODULE WIRING (T029 / T030 / PR-O)
 // =============================================================================
-// Each block below is commented out — the module file does not exist yet.
-// Module files ship in subsequent PRs (PR-B through PR-Q).
-// The parameter shapes shown here define the contract each module must satisfy.
-// When PR-O (T029/T030) wires everything together, these blocks are uncommented.
+// Modules are invoked in dependency order:
+//   1. network            VNet / subnets / NSGs / 13 PDNS zones
+//   2. identity           UAMIs: api, ingest, web
+//   3. monitoring         LAW + AppInsights + AMPLS PE
+//   4. registry           ACR + AcrPull -> 3 app MIs
+//   5. keyvault           KV + Secrets User -> api,ingest + Admin -> adminGroup
+//   6. storage            StorageV2 + 2 PEs + EG topic + Blob/Queue RBAC
+//   7. openai             AOAI + 2 model deployments + Cog Svcs OpenAI User RBAC
+//   8. cosmos             Cosmos NoSQL + 3 containers + sqlRoleAssignments
+//   9. docintel           DocIntel + Cog Svcs User RBAC
+//  10. search             AI Search Basic + SPLs to AOAI/Storage + Index RBAC
+//  11. containerapps      ACA env + web/api apps + ingest job
+//  12. bastion            Gated; Bastion Developer + jumpbox VM
+//  13. apim               APIM Developer / internal VNet
 //
-// Placeholder format:
-//   // {TaskID} / {PR-label} — {one-line description of what this module does}
+// IMPORTANT: openai + storage deploy BEFORE search — AI Search shared private
+// links to AOAI/Storage require those resources to exist on first deploy.
 // =============================================================================
 
 // ── Layer 1: Foundation ───────────────────────────────────────────────────────
 
-// T017 / PR-B — VNet (10.0.0.0/22) + 5 subnets + NSGs + 13 Private DNS Zones (gated by customerProvidedDns)
-// module network 'modules/network/main.bicep' = {
-//   name: 'network'
-//   scope: rg
-//   params: {
-//     location:             location
-//     tags:                 tags
-//     vnetName:             names.vnet
-//     vnetAddressPrefix:    vnetAddressPrefix
-//     snetAcaName:          'snet-aca'
-//     snetAcaPrefix:        snetAcaPrefix
-//     snetPeName:           'snet-pe'
-//     snetPePrefix:         snetPePrefix
-//     snetJobsName:         'snet-jobs'          // RESERVED — no delegation
-//     snetJobsPrefix:       snetJobsPrefix
-//     snetBastionName:      'AzureBastionSubnet' // Required name for Bastion
-//     snetBastionPrefix:    snetBastionPrefix
-//     snetApimName:         'snet-apim'
-//     snetApimPrefix:       snetApimPrefix
-//     nsgAcaName:           names.nsgAca
-//     nsgPeName:            names.nsgPe
-//     nsgJobsName:          names.nsgJobs
-//     nsgBastionName:       names.nsgBastion
-//     nsgApimName:          names.nsgApim
-//     customerProvidedDns:  customerProvidedDns
-//   }
-// }
+// T017 / PR-B
+module network 'modules/network/main.bicep' = {
+  name: 'network'
+  scope: rg
+  params: {
+    location:             location
+    tags:                 tags
+    vnetName:             names.vnet
+    vnetAddressPrefix:    vnetAddressPrefix
+    snetAcaName:          'snet-aca'
+    snetAcaPrefix:        snetAcaPrefix
+    snetPeName:           'snet-pe'
+    snetPePrefix:         snetPePrefix
+    snetJobsName:         'snet-jobs'
+    snetJobsPrefix:       snetJobsPrefix
+    snetBastionName:      'AzureBastionSubnet'
+    snetBastionPrefix:    snetBastionPrefix
+    snetApimName:         'snet-apim'
+    snetApimPrefix:       snetApimPrefix
+    nsgAcaName:           names.nsgAca
+    nsgPeName:            names.nsgPe
+    nsgJobsName:          names.nsgJobs
+    nsgBastionName:       names.nsgBastion
+    nsgApimName:          names.nsgApim
+    customerProvidedDns:  customerProvidedDns
+  }
+}
 
-// T018 / PR-C — 3 user-assigned managed identities: mi-api, mi-ingest, mi-web
-// module identity 'modules/identity/main.bicep' = {
-//   name: 'identity'
-//   scope: rg
-//   params: {
-//     location:             location
-//     tags:                 tags
-//     identityApiName:      names.identityApi
-//     identityIngestName:   names.identityIngest
-//     identityWebName:      names.identityWeb
-//   }
-// }
+// T018 / PR-C
+module identity 'modules/identity/main.bicep' = {
+  name: 'identity'
+  scope: rg
+  params: {
+    location:           location
+    tags:               tags
+    identityApiName:    names.identityApi
+    identityIngestName: names.identityIngest
+    identityWebName:    names.identityWeb
+  }
+}
 
 // ── Layer 2: Platform Services ────────────────────────────────────────────────
 
-// T019 / PR-D — Log Analytics Workspace, App Insights (workspace-based), AMPLS + PE, monthly Budget alert
-// module monitoring 'modules/monitoring/main.bicep' = {
-//   name: 'monitoring'
-//   scope: rg
-//   dependsOn: [network]
-//   params: {
-//     location:                 location
-//     tags:                     tags
-//     lawName:                  names.law
-//     appInsightsName:          names.appInsights
-//     amplsName:                names.ampls
-//     peSubnetId:               network.outputs.snetPeId
-//     budgetName:               names.budget
-//     budgetMonthlyUsd:         budgetMonthlyUsd
-//     customerProvidedDns:      customerProvidedDns
-//   }
-// }
+// T019 / PR-D
+module monitoring 'modules/monitoring/main.bicep' = {
+  name: 'monitoring'
+  scope: rg
+  params: {
+    location:                  location
+    tags:                      tags
+    lawName:                   names.law
+    appInsightsName:           names.appInsights
+    amplsName:                 names.ampls
+    peSubnetId:                network.outputs.snetPeId
+    privateDnsZoneIdMonitor:   network.outputs.pdnsMonitorId
+    privateDnsZoneIdOms:       network.outputs.pdnsOmsId
+    privateDnsZoneIdOds:       network.outputs.pdnsOdsId
+    privateDnsZoneIdAgentSvc:  network.outputs.pdnsAgentSvcId
+    privateDnsZoneIdBlob:      network.outputs.pdnsBlobId
+  }
+}
 
-// T020 / PR-E — ACR Premium + Private Endpoint + AcrPull role assignments for all 3 managed identities
-// module registry 'modules/registry/main.bicep' = {
-//   name: 'registry'
-//   scope: rg
-//   dependsOn: [network, identity]
-//   params: {
-//     location:                     location
-//     tags:                         tags
-//     acrName:                      names.acr
-//     peSubnetId:                   network.outputs.snetPeId
-//     identityApiPrincipalId:       identity.outputs.identityApiPrincipalId
-//     identityIngestPrincipalId:    identity.outputs.identityIngestPrincipalId
-//     identityWebPrincipalId:       identity.outputs.identityWebPrincipalId
-//     enableZoneRedundancy:         enableZoneRedundancy
-//     customerProvidedDns:          customerProvidedDns
-//   }
-// }
+// T020 / PR-E — ACR + AcrPull -> web/api/ingest UAMIs (closes T020 RBAC fan-out)
+module registry 'modules/registry/main.bicep' = {
+  name: 'registry'
+  scope: rg
+  params: {
+    location:             location
+    tags:                 tags
+    acrName:              names.acr
+    peSubnetId:           network.outputs.snetPeId
+    privateDnsZoneId:     network.outputs.pdnsAcrId
+    acrPullPrincipalIds:  [
+      identity.outputs.identityWebPrincipalId
+      identity.outputs.identityApiPrincipalId
+      identity.outputs.identityIngestPrincipalId
+    ]
+  }
+}
 
-// T021 / PR-F — Key Vault Standard + Private Endpoint + RBAC auth (no legacy access policies)
-// module keyvault 'modules/keyvault/main.bicep' = {
-//   name: 'keyvault'
-//   scope: rg
-//   dependsOn: [network]
-//   params: {
-//     location:            location
-//     tags:                tags
-//     keyVaultName:        names.keyvault
-//     peSubnetId:          network.outputs.snetPeId
-//     adminGroupObjectId:  adminGroupObjectId
-//     customerProvidedDns: customerProvidedDns
-//   }
-// }
-
-// ── Layer 2.5: API Gateway ────────────────────────────────────────────────────
-
-// T032a / PR-L — APIM (Premium or Developer SKU) in VNet-injected internal mode; system MI; diagnostics → LAW + App Insights
-// NOTE: virtualNetworkType is always 'Internal' — no public endpoints. See C.1 in phase-2-plan.md for SKU rationale.
-// module apim 'modules/apim/main.bicep' = {
-//   name: 'apim'
-//   scope: rg
-//   dependsOn: [network, identity, monitoring]
-//   params: {
-//     location:                     location
-//     tags:                         tags
-//     apimName:                     names.apim
-//     apimSku:                      apimSku
-//     apimPublisherEmail:           apimPublisherEmail
-//     apimPublisherName:            apimPublisherName
-//     subnetId:                     network.outputs.snetApimId
-//     lawId:                        monitoring.outputs.lawId
-//     appInsightsId:                monitoring.outputs.appInsightsId
-//     appInsightsConnectionString:  monitoring.outputs.appInsightsConnectionString
-//     customerProvidedDns:          customerProvidedDns
-//   }
-// }
+// T021 / PR-F — Key Vault + Secrets User (api/ingest) + optional Admin (adminGroup)
+module keyvault 'modules/keyvault/main.bicep' = {
+  name: 'keyvault'
+  scope: rg
+  params: {
+    location:                 location
+    tags:                     tags
+    vaultName:                names.keyvault
+    peSubnetId:               network.outputs.snetPeId
+    privateDnsZoneId:         network.outputs.pdnsKeyVaultId
+    lawId:                    monitoring.outputs.lawId
+    adminGroupObjectId:       adminGroupObjectId
+    secretsUserPrincipalIds:  [
+      identity.outputs.identityApiPrincipalId
+      identity.outputs.identityIngestPrincipalId
+    ]
+  }
+}
 
 // ── Layer 3: Data Plane ───────────────────────────────────────────────────────
-// IMPORTANT: openai deploys BEFORE search — AI Search shared private link to AOAI
-// requires the AOAI resource to exist on first deploy. See phase-2-plan.md §D.
 
-// T025 / PR-I — Azure OpenAI + Private Endpoint + gpt-5 (chat) + text-embedding-3-large deployments
-// module openai 'modules/openai/main.bicep' = {
-//   name: 'openai'
-//   scope: rg
-//   dependsOn: [network, identity]
-//   params: {
-//     location:                   location
-//     tags:                       tags
-//     openAiName:                 names.openai
-//     peSubnetId:                 network.outputs.snetPeId
-//     chatModel:                  chatModel
-//     embeddingModel:             embeddingModel
-//     identityApiPrincipalId:     identity.outputs.identityApiPrincipalId
-//     identityIngestPrincipalId:  identity.outputs.identityIngestPrincipalId
-//     enableCustomerManagedKey:   enableCustomerManagedKey
-//     keyVaultId:                 keyvault.outputs.keyVaultId
-//     customerProvidedDns:        customerProvidedDns
-//   }
-// }
+// T022 / PR-G — Storage + Blob (Contributor:ingest, Reader:api) + Queue Reader:ingest
+module storage 'modules/storage/main.bicep' = {
+  name: 'storage'
+  scope: rg
+  params: {
+    location:                     location
+    tags:                         tags
+    #disable-next-line BCP334 // names.storage is take()-truncated; min-length 3 always satisfied for non-empty namingPrefix
+    name:                         names.storage
+    peSubnetId:                   network.outputs.snetPeId
+    pdnsBlobId:                   network.outputs.pdnsBlobId
+    pdnsQueueId:                  network.outputs.pdnsQueueId
+    lawId:                        monitoring.outputs.lawId
+    blobContributorPrincipalIds:  [
+      identity.outputs.identityIngestPrincipalId
+    ]
+    blobReaderPrincipalIds:       [
+      identity.outputs.identityApiPrincipalId
+    ]
+    queueReaderPrincipalIds:      [
+      identity.outputs.identityIngestPrincipalId
+    ]
+  }
+}
 
-// T022 / PR-G — StorageV2 + Private Endpoints (blob + queue) + containers + lifecycle policy + Event Grid system topic
-// module storage 'modules/storage/main.bicep' = {
-//   name: 'storage'
-//   scope: rg
-//   dependsOn: [network, identity]
-//   params: {
-//     location:                   location
-//     tags:                       tags
-//     storageName:                names.storage
-//     peSubnetId:                 network.outputs.snetPeId
-//     identityIngestPrincipalId:  identity.outputs.identityIngestPrincipalId
-//     identityApiPrincipalId:     identity.outputs.identityApiPrincipalId
-//     enableZoneRedundancy:       enableZoneRedundancy
-//     enableCustomerManagedKey:   enableCustomerManagedKey
-//     keyVaultId:                 keyvault.outputs.keyVaultId
-//     customerProvidedDns:        customerProvidedDns
-//   }
-// }
+// T025 / PR-I — Azure OpenAI + Cog Svcs OpenAI User -> api/ingest
+module openai 'modules/openai/main.bicep' = {
+  name: 'openai'
+  scope: rg
+  params: {
+    location:                location
+    tags:                    tags
+    name:                    names.openai
+    peSubnetId:              network.outputs.snetPeId
+    pdnsOpenaiId:            network.outputs.pdnsOpenaiId
+    lawId:                   monitoring.outputs.lawId
+    chatModel:               chatModel
+    chatDeploymentName:      chatModel
+    embeddingModel:          embeddingModel
+    embeddingDeploymentName: embeddingModel
+    openAiUserPrincipalIds:  [
+      identity.outputs.identityApiPrincipalId
+      identity.outputs.identityIngestPrincipalId
+    ]
+  }
+}
 
-// T023 / PR-H — Cosmos DB NoSQL + Private Endpoint + 3 containers (docs, chunks, leases) with TTL
-// module cosmos 'modules/cosmos/main.bicep' = {
-//   name: 'cosmos'
-//   scope: rg
-//   dependsOn: [network, identity]
-//   params: {
-//     location:                   location
-//     tags:                       tags
-//     cosmosName:                 names.cosmos
-//     peSubnetId:                 network.outputs.snetPeId
-//     identityApiPrincipalId:     identity.outputs.identityApiPrincipalId
-//     identityIngestPrincipalId:  identity.outputs.identityIngestPrincipalId
-//     cosmosCapacityMode:         cosmosCapacityMode
-//     enableZoneRedundancy:       enableZoneRedundancy
-//     enableCustomerManagedKey:   enableCustomerManagedKey
-//     keyVaultId:                 keyvault.outputs.keyVaultId
-//     customerProvidedDns:        customerProvidedDns
-//   }
-// }
+// T023 / PR-H — Cosmos NoSQL + sqlRoleAssignments (Built-in Data Contributor)
+module cosmos 'modules/cosmos/main.bicep' = {
+  name: 'cosmos'
+  scope: rg
+  params: {
+    location:                     location
+    tags:                         tags
+    name:                         names.cosmos
+    peSubnetId:                   network.outputs.snetPeId
+    pdnsCosmosId:                 network.outputs.pdnsCosmosId
+    lawId:                        monitoring.outputs.lawId
+    dataContributorPrincipalIds:  [
+      identity.outputs.identityApiPrincipalId
+      identity.outputs.identityIngestPrincipalId
+    ]
+  }
+}
 
-// T026 / PR-K — Document Intelligence + Private Endpoint
-// module docintel 'modules/docintel/main.bicep' = {
-//   name: 'docintel'
-//   scope: rg
-//   dependsOn: [network, identity]
-//   params: {
-//     location:                   location
-//     tags:                       tags
-//     docIntelName:               names.docintel
-//     peSubnetId:                 network.outputs.snetPeId
-//     identityIngestPrincipalId:  identity.outputs.identityIngestPrincipalId
-//     customerProvidedDns:        customerProvidedDns
-//   }
-// }
+// T026 / PR-K — Document Intelligence + Cog Svcs User -> api/ingest
+module docintel 'modules/docintel/main.bicep' = {
+  name: 'docintel'
+  scope: rg
+  params: {
+    location:                          location
+    tags:                              tags
+    name:                              names.docintel
+    peSubnetId:                        network.outputs.snetPeId
+    pdnsCogsvcsId:                     network.outputs.pdnsCognitiveId
+    lawId:                             monitoring.outputs.lawId
+    cognitiveServicesUserPrincipalIds: [
+      identity.outputs.identityApiPrincipalId
+      identity.outputs.identityIngestPrincipalId
+    ]
+  }
+}
 
-// T024 / PR-J — AI Search S1 + Private Endpoint + shared private links to AOAI + Storage
-// ← explicit dependsOn openai: shared private link to AOAI requires AOAI resource to exist
-// module search 'modules/search/main.bicep' = {
-//   name: 'search'
-//   scope: rg
-//   dependsOn: [network, identity, openai]
-//   params: {
-//     location:                   location
-//     tags:                       tags
-//     searchName:                 names.search
-//     aiSearchSku:                aiSearchSku
-//     peSubnetId:                 network.outputs.snetPeId
-//     identityApiPrincipalId:     identity.outputs.identityApiPrincipalId
-//     identityIngestPrincipalId:  identity.outputs.identityIngestPrincipalId
-//     openAiResourceId:           openai.outputs.openAiResourceId
-//     storageAccountId:           storage.outputs.storageAccountId
-//     customerProvidedDns:        customerProvidedDns
-//   }
-// }
+// T024 / PR-J — AI Search Basic + SPLs (AOAI, Storage) + Index RBAC
+// IMPLICIT deps: openai + storage (via output references in params).
+module search 'modules/search/main.bicep' = {
+  name: 'search'
+  scope: rg
+  params: {
+    location:                     location
+    tags:                         tags
+    name:                         names.search
+    peSubnetId:                   network.outputs.snetPeId
+    pdnsSearchId:                 network.outputs.pdnsSearchId
+    lawId:                        monitoring.outputs.lawId
+    aoaiResourceId:               openai.outputs.resourceId
+    storageBlobResourceId:        storage.outputs.resourceId
+    indexContributorPrincipalIds: [
+      identity.outputs.identityIngestPrincipalId
+    ]
+    indexReaderPrincipalIds:      [
+      identity.outputs.identityApiPrincipalId
+    ]
+  }
+}
 
 // ── Layer 4: Compute ──────────────────────────────────────────────────────────
 
-// T027 / PR-M — ACA Environment (internal=true, VNet-integrated) + api app + ingest app + ingest job
-// NOTE: ACA supports one infrastructure subnet per environment; apps + jobs share snet-aca.
-// module containerapps 'modules/containerapps/main.bicep' = {
-//   name: 'containerapps'
-//   scope: rg
-//   dependsOn: [network, identity, monitoring, registry]
-//   params: {
-//     location:                      location
-//     tags:                          tags
-//     acaEnvName:                    names.acaEnv
-//     acaApiName:                    names.acaApi
-//     acaIngestName:                 names.acaIngest
-//     acaWebName:                    names.acaWeb
-//     subnetId:                      network.outputs.snetAcaId
-//     identityApiId:                 identity.outputs.identityApiId
-//     identityIngestId:              identity.outputs.identityIngestId
-//     identityWebId:                 identity.outputs.identityWebId
-//     lawId:                         monitoring.outputs.lawId
-//     appInsightsConnectionString:   monitoring.outputs.appInsightsConnectionString
-//     acrLoginServer:                registry.outputs.acrLoginServer
-//   }
-// }
+// T027 / PR-M — ACA env + web app + api app + ingest job
+// Env vars are sourced from data-plane outputs so apps reach dependencies via
+// Entra MI (no secrets in env, no shared keys anywhere).
+module containerapps 'modules/containerapps/main.bicep' = {
+  name: 'containerapps'
+  scope: rg
+  params: {
+    location:                     location
+    tags:                         tags
+    name:                         names.acaEnv
+    peSubnetId:                   network.outputs.snetAcaId
+    lawId:                        monitoring.outputs.lawId
+    appInsightsConnectionString:  monitoring.outputs.appInsightsConnectionString
+    acrLoginServer:               registry.outputs.acrLoginServer
+    miWebId:                      identity.outputs.identityWebId
+    miApiId:                      identity.outputs.identityApiId
+    miIngestId:                   identity.outputs.identityIngestId
+    ingestionStorageAccountName:  storage.outputs.name
+    ingestionQueueName:           storage.outputs.ingestionQueueName
+    appEnvVars: {
+      AZURE_OPENAI_ENDPOINT:           openai.outputs.endpoint
+      AZURE_OPENAI_CHAT_DEPLOYMENT:    openai.outputs.chatDeploymentName
+      AZURE_OPENAI_EMBED_DEPLOYMENT:   openai.outputs.embeddingDeploymentName
+      AZURE_SEARCH_ENDPOINT:           search.outputs.endpoint
+      AZURE_COSMOS_ENDPOINT:           cosmos.outputs.endpoint
+      AZURE_COSMOS_DATABASE:           cosmos.outputs.databaseName
+      AZURE_STORAGE_ACCOUNT:           storage.outputs.name
+      AZURE_STORAGE_BLOB_ENDPOINT:     storage.outputs.primaryBlobEndpoint
+      AZURE_STORAGE_CORPUS_CONTAINER:  storage.outputs.sharedCorpusContainerName
+      AZURE_STORAGE_UPLOADS_CONTAINER: storage.outputs.userUploadsContainerName
+      AZURE_DOCINTEL_ENDPOINT:         docintel.outputs.endpoint
+      AZURE_KEYVAULT_URI:              keyvault.outputs.kvUri
+    }
+    apiExtraEnvVars: {
+      AZURE_CLIENT_ID: identity.outputs.identityApiClientId
+    }
+    ingestExtraEnvVars: {
+      AZURE_CLIENT_ID: identity.outputs.identityIngestClientId
+    }
+    webExtraEnvVars: {
+      AZURE_CLIENT_ID: identity.outputs.identityWebClientId
+    }
+  }
+}
 
-// T028 / PR-N — Azure Bastion Standard + Linux jumpbox VM (Ubuntu 24.04, Standard_B2s) in snet-pe
-// NOTE: Jumpbox is in snet-pe (not a dedicated subnet) — conserves IP space; internal-only, MI-authenticated.
-// NOTE: Bastion Standard is the ONLY resource with a public IP — documented exception to SC-004.
-// NOTE: Phase 2a v3 budget plan defaults deployBastion=false / deployJumpbox=true — Bastion Developer
-//       (free portal-only RDP/SSH, shared MS pool) reaches the jumpbox without a deployed Bastion host.
-//       PR-N will split this into two `if (...)` modules: bastion-only and jumpbox-only.
-// module bastion 'modules/bastion/main.bicep' = if (deployBastion || deployJumpbox) {
-//   name: 'bastion'
-//   scope: rg
-//   dependsOn: [network]
-//   params: {
-//     location:         location
-//     tags:             tags
-//     bastionName:      names.bastion
-//     jumpboxName:      names.jumpbox
-//     bastionSubnetId:  network.outputs.snetBastionId
-//     jumpboxSubnetId:  network.outputs.snetPeId
-//   }
-// }
+// T028 / PR-N — Bastion Developer (gated) + Linux jumpbox VM in snet-pe
+module bastion 'modules/bastion/main.bicep' = if (deployBastion || deployJumpbox) {
+  name: 'bastion'
+  scope: rg
+  params: {
+    deployBastion:    deployBastion || deployJumpbox
+    name:             baseName
+    location:         location
+    tags:             tags
+    bastionSubnetId:  network.outputs.snetBastionId
+    vmSubnetId:       network.outputs.snetPeId
+    lawId:            monitoring.outputs.lawId
+    adminUsername:    jumpboxAdminUsername
+    adminPublicKey:   jumpboxAdminPublicKey
+  }
+}
 
-// ── Layer 5: Cross-Cutting Wiring ─────────────────────────────────────────────
+// ── Layer 2.5: API Gateway ────────────────────────────────────────────────────
+// Deployed late so the App Insights connection string is available. APIM has
+// no inbound dependency on the data plane (Phase 3 wires backends/policies).
 
-// T029 + T030 / PR-O — RBAC role assignments across all resources + full main.bicep module wiring
-// This PR uncomments all module blocks above, adds inter-module role assignments,
-// and expands the outputs section below.
+// T032a / PR-L — APIM Developer SKU, Internal VNet mode, App Insights logger
+module apim 'modules/apim/main.bicep' = {
+  name: 'apim'
+  scope: rg
+  params: {
+    location:                    location
+    tags:                        tags
+    name:                        names.apim
+    peSubnetId:                  network.outputs.snetApimId
+    lawId:                       monitoring.outputs.lawId
+    appInsightsId:               monitoring.outputs.appInsightsId
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    publisherEmail:              apimPublisherEmail
+    publisherName:               apimPublisherName
+  }
+}
 
 // ── Layer 6: Polish ───────────────────────────────────────────────────────────
-
-// T031 / PR-P — AVM refactor pass: audit all modules for latest AVM versions; replace any hand-rolled with AVM where mature
-// T032 / PR-Q — infra/README.md: module documentation, AVM version table, first-deploy guidance, known caveats
+// T031 / PR-P — AVM refactor pass
+// T032 / PR-Q — infra/README.md
 
 // =============================================================================
 // OUTPUTS
 // =============================================================================
-// Minimal outputs from the shell — expanded in PR-O (T030) when modules are wired.
-// Commented outputs below define the contract: shape and name are fixed now
-// so downstream callers (azd, postprovision hooks) can be written against them.
-
+// Identity / scope ------------------------------------------------------------
 output resourceGroupName string = rg.name
 output resourceGroupId   string = rg.id
 output location          string = location
 output environmentName   string = environmentName
 
-// The following outputs are uncommented in PR-O (T029/T030) once modules ship:
-// output vnetId                      string = network.outputs.vnetId
-// output acaEnvDefaultDomain         string = containerapps.outputs.acaEnvDefaultDomain
-// output uiUrl                       string = 'https://web.${containerapps.outputs.acaEnvDefaultDomain}'
-// output acrLoginServer              string = registry.outputs.acrLoginServer
-// output cosmosEndpoint              string = cosmos.outputs.cosmosEndpoint
-// output searchEndpoint              string = search.outputs.searchEndpoint
-// output openAiEndpoint              string = openai.outputs.openAiEndpoint
-// output storageAccountName          string = storage.outputs.storageAccountName
-// output keyVaultUri                 string = keyvault.outputs.keyVaultUri
-// output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
-// output apimGatewayUrl              string = apim.outputs.apimGatewayUrl  // internal APIM gateway URL
-// output apimResourceId              string = apim.outputs.apimResourceId  // for RBAC wiring in T029
+// Networking ------------------------------------------------------------------
+output vnetId            string = network.outputs.vnetId
+output snetAcaId         string = network.outputs.snetAcaId
+output snetPeId          string = network.outputs.snetPeId
+output snetApimId        string = network.outputs.snetApimId
+
+// Identities ------------------------------------------------------------------
+output identityApiClientId    string = identity.outputs.identityApiClientId
+output identityIngestClientId string = identity.outputs.identityIngestClientId
+output identityWebClientId    string = identity.outputs.identityWebClientId
+
+// Observability ---------------------------------------------------------------
+output lawId                       string = monitoring.outputs.lawId
+output appInsightsId               string = monitoring.outputs.appInsightsId
+@secure()
+output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
+
+// Registry --------------------------------------------------------------------
+output acrLoginServer string = registry.outputs.acrLoginServer
+output acrName        string = registry.outputs.acrName
+
+// Data plane ------------------------------------------------------------------
+output keyVaultUri              string = keyvault.outputs.kvUri
+output storageAccountName       string = storage.outputs.name
+output storagePrimaryBlobEndpoint string = storage.outputs.primaryBlobEndpoint
+output ingestionQueueName       string = storage.outputs.ingestionQueueName
+output cosmosEndpoint           string = cosmos.outputs.endpoint
+output cosmosDatabaseName       string = cosmos.outputs.databaseName
+output openAiEndpoint           string = openai.outputs.endpoint
+output openAiChatDeployment     string = openai.outputs.chatDeploymentName
+output openAiEmbedDeployment    string = openai.outputs.embeddingDeploymentName
+output searchEndpoint           string = search.outputs.endpoint
+output docIntelEndpoint         string = docintel.outputs.endpoint
+
+// Compute (internal FQDNs — VNet-only resolvable) -----------------------------
+output acaEnvironmentId string = containerapps.outputs.resourceId
+output webAppFqdn       string = containerapps.outputs.webAppFqdn
+output apiAppFqdn       string = containerapps.outputs.apiAppFqdn
+output webAppName       string = containerapps.outputs.webAppName
+output apiAppName       string = containerapps.outputs.apiAppName
+output ingestJobName    string = containerapps.outputs.ingestJobName
+
+// "Printed UI URL" per T030 — internal HTTPS to the web Container App.
+// Resolves only inside the platform VNet (or via the Bastion jumpbox).
+output uiUrl string = 'https://${containerapps.outputs.webAppFqdn}'
+
+// API Gateway -----------------------------------------------------------------
+output apimGatewayUrl  string = apim.outputs.gatewayUrl
+output apimResourceId  string = apim.outputs.resourceId
