@@ -1,42 +1,88 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+#
+# Private RAG Accelerator — azd orchestration manifest
+# -----------------------------------------------------
+# `azd up` runs the following pipeline:
+#   1. preprovision   → scripts/preflight.{ps1,sh}    (T056 — gate; aborts on non-zero exit)
+#   2. provision      → infra/main.bicep              (T015–T046 — full private topology)
+#   3. postprovision  → scripts/postprovision.ps1     (T047 — kb-index PUT, sample seeding)
+#   4. deploy         → per-service container build + push + revision rollout
+#
+# Image build strategy (private ACR — publicNetworkAccess: Disabled, see PR #6)
+# -----------------------------------------------------------------------------
+# The registry is not reachable from the operator's workstation. We delegate the
+# build to ACR Tasks so it executes inside the registry's network boundary
+# (`docker.remoteBuild: true`). ACR Tasks resolve the registry login server via
+# the private DNS zone and push without traversing the public Internet.
+#
+# Fallback: if a future azd version drops `remoteBuild`, run
+#   az acr build --registry <acrName> --image <svc>:<tag> ./apps/<svc>
+# from a jumpbox in the platform VNet (see docs/deploy.md "Troubleshooting").
+#
 name: private-rag-accelerator
 metadata:
-  template: private-rag-accelerator
+  template: private-rag-accelerator@1.0.0
 
-# Infrastructure path for Bicep deployments
 infra:
   provider: bicep
   path: ./infra
+  module: main
 
 services:
-  api:
-    project: ./apps/api
-    language: python
-    host: containerapp
-    docker:
-      path: ./apps/api/Dockerfile
-      context: ./apps/api
-
-  ingest:
-    project: ./apps/ingest
-    language: python
-    host: containerapp
-    docker:
-      path: ./apps/ingest/Dockerfile
-      context: ./apps/ingest
-
   web:
     project: ./apps/web
     language: js
     host: containerapp
+    # Bind to the deployed Container App by name (Bicep output WEB_APP_NAME).
+    resourceName: ${WEB_APP_NAME}
     docker:
-      path: ./apps/web/Dockerfile
-      context: ./apps/web
+      path: ./Dockerfile
+      context: .
+      remoteBuild: true
 
-# Lifecycle hooks — see scripts/postprovision.ps1 (T047)
+  api:
+    project: ./apps/api
+    language: python
+    host: containerapp
+    resourceName: ${API_APP_NAME}
+    docker:
+      path: ./Dockerfile
+      context: .
+      remoteBuild: true
+
+  ingest:
+    project: ./apps/ingest
+    language: python
+    # `ingest` is a Container Apps Job (Microsoft.App/jobs); azd's containerapp
+    # host targets the deployed resource by name and pushes a new image tag.
+    host: containerapp
+    resourceName: ${INGEST_JOB_NAME}
+    docker:
+      path: ./Dockerfile
+      context: .
+      remoteBuild: true
+
+# Lifecycle hooks
+# - preprovision  → T056: gate `azd up` on local toolchain + auth state.
+#                  A non-zero exit aborts provisioning with the script's own
+#                  actionable error messages (continueOnError: false).
+# - postprovision → T047: idempotent kb-index creation + sample seeding +
+#                  print UI URL / Bastion connect instructions.
 hooks:
+  preprovision:
+    windows:
+      shell: pwsh
+      run: ./scripts/preflight.ps1
+      continueOnError: false
+      interactive: false
+    posix:
+      shell: sh
+      run: ./scripts/preflight.sh
+      continueOnError: false
+      interactive: false
+
   postprovision:
     shell: pwsh
     run: ./scripts/postprovision.ps1
-    interactive: false
     continueOnError: false
+    interactive: false
