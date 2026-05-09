@@ -1,1 +1,1 @@
-"""Service-layer integrations (auth, Cosmos, Search, AOAI, ...)."""
+"""Service layer (Azure SDK clients bound to managed identity)."""
