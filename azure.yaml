@@ -32,3 +32,11 @@ services:
     docker:
       path: ./apps/web/Dockerfile
       context: ./apps/web
+
+# Lifecycle hooks — see scripts/postprovision.ps1 (T047)
+hooks:
+  postprovision:
+    shell: pwsh
+    run: ./scripts/postprovision.ps1
+    interactive: false
+    continueOnError: false
