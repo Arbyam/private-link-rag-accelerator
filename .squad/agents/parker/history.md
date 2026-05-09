@@ -9,3 +9,7 @@
 
 ## Learnings
 <!-- Append test patterns, fixture strategies, in-VNet test setup notes below -->
+
+### Phase 1 Completion (2026-05-09)
+- T010 completed; linting configuration established (ruff, eslint, bicep linting)
+- Commit 1d789c9 merged to PR #2
