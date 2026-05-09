@@ -163,3 +163,26 @@ PR-E history already noted parallel-agent branch thrashing. This PR proved it: m
 - `kvId` → consumers needing scope for role assignments (PR-N)
 - `kvUri` → APIM named-value secret refs, app config
 - `peId` → not consumed yet but kept symmetric with PR-E (registry) and future modules
+
+
+### Phase 2a — PR-B: network module (T017) — 2026-05-08
+**PR #10 merged** (squash, auto-merge): phase-2a/pr-b-network-module →  01-private-rag-accelerator
+
+#### Module shape
+- VNet `10.0.0.0/22` (1024 IPs); 5 subnets inlined under `Microsoft.Network/virtualNetworks@2024-05-01` (NOT separate child subnet resources — avoids the `AnotherOperationInProgress` race when 5 subnets deploy in parallel).
+- Subnets: `snet-aca` /24 (`Microsoft.App/environments` delegation), `snet-pe` /24 (PE+jumpbox, `privateEndpointNetworkPolicies: Disabled`), `snet-jobs` /24 (RESERVED, deny-all NSG only), `AzureBastionSubnet` /26 (always provisioned even when bastionSku=Developer — keeps NSG idempotent), `snet-apim` /27 carved from `10.0.3.64`.
+- 5 hand-rolled NSGs; every one terminates in shared `denyInboundInternetRule` at priority 4096. APIM NSG includes the canonical `ApiManagement → :3443` mgmt rule + `AzureLoadBalancer → :6390` health probe; Bastion NSG is the full inbound/outbound matrix from the docs (Internet:443, GatewayManager, AzureLB, BastionHostCommunication 8080/5701, plus outbound VNet:22/3389 + AzureCloud:443).
+- 13 Private DNS zones via AVM `br/public:avm/res/network/private-dns-zone:0.7.1` in a single `[for]` loop with `virtualNetworkLinks` shape. `registrationEnabled: false` for all.
+
+#### AVM versions used
+- `avm/res/network/private-dns-zone:0.7.1` ✅ — clean shape, exposes `virtualNetworkLinks` array, returns `outputs.resourceId`.
+- VNet/subnets/NSGs hand-rolled. AVM `virtual-network` would work but inline subnets give cleaner review surface and avoid AVM's separate `subnets[*].networkSecurityGroupResourceId` indirection.
+
+#### Bicep gotchas hit
+1. **BCP247** — `toObject(range(0,len), i => names[i], i => modules[i].outputs.resourceId)` is rejected: lambda variables can't index a module collection. Workaround attempted via `var entries = [for ...]` then `toObject(entries, ...)` but that hits **BCP182** (module `outputs` not computable at start of deployment for variable for-bodies). **Resolution:** drop the map, expose 13 named outputs (`pdnsOpenaiId`, `pdnsBlobId`, …, `pdnsApimId`) plus a parallel `privateDnsZoneIdList` array. More ergonomic for downstream modules anyway.
+2. **BCP318** null warnings on conditional module collections. Fix: safe-access operator — `privateDnsZones[i].?outputs.resourceId ?? ''`. Combined with the `customerProvidedDns ? '' : ...` ternary, this is null-clean.
+3. `no-hardcoded-env-urls` linter flags `core.windows.net` in DNS zone literals. `#disable-next-line no-hardcoded-env-urls` placed immediately above each affected line works (the directive on the param declaration line itself does NOT propagate to inner array literal lines).
+4. **Branch hygiene gotcha:** the local branch `phase-2a/pr-b-network-module` already existed (stale from a prior spawn pointing at d3cdfa9). `git checkout -b` reported "Switched to a new branch" but my work commit ended up on `001-private-rag-accelerator` instead. Recovery: `git checkout -B phase-2a/pr-b-network-module` (force re-create at HEAD), `git branch -f 001-private-rag-accelerator origin/001-private-rag-accelerator`, `git push -f`. **Lesson for future spawns:** check `git branch | Select-String <name>` before `git checkout -b`, and verify `git branch --show-current` after.
+
+#### Validation
+- `az bicep build --file infra/modules/network/main.bicep --outdir $env:TEMP\bicep-out` exits 0, **zero warnings**.
