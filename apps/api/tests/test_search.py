@@ -12,11 +12,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.services.search import (
-    ScopeFilterMissingError,
     ScopedSearchClient,
+    ScopeFilterMissingError,
     SearchResults,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test helpers
