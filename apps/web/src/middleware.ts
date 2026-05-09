@@ -13,5 +13,5 @@ export const { auth: middleware } = NextAuth(authConfig);
 export const config = {
   // Run on every route except static assets and Auth.js internal endpoints.
   // The `authorized` callback in auth.config.ts does the actual gating.
-  matcher: ['/((?!api/auth|_next/static|_next/image|favicon.ico|login|.*\\..*).*)'],
+  matcher: ['/((?!api/auth|_next/static|_next/image|favicon.ico|signin|error|.*\\..*).*)'],
 };
