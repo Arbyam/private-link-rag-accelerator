@@ -45,6 +45,9 @@
       "value": false
     },
     "deployBastion": {
+      "value": false
+    },
+    "deployJumpbox": {
       "value": true
     },
     "enableZoneRedundancy": {
@@ -60,10 +63,10 @@
       "value": "text-embedding-3-large"
     },
     "aiSearchSku": {
-      "value": "standard"
+      "value": "basic"
     },
     "apimSku": {
-      "value": "Premium"
+      "value": "Developer"
     },
     "apimPublisherEmail": {
       "value": "azd@example.com"
@@ -71,11 +74,11 @@
     "apimPublisherName": {
       "value": "RAG Accelerator"
     },
-    "cosmosAutoscaleMaxRu": {
-      "value": 4000
+    "cosmosCapacityMode": {
+      "value": "Serverless"
     },
     "budgetMonthlyUsd": {
-      "value": 5000
+      "value": 500
     }
   }
 }

@@ -93,8 +93,11 @@ param customerProvidedDns bool = false
 
 // ── Feature Flags ────────────────────────────────────────────────────────────
 
-@description('Deploy Azure Bastion Standard + Linux jumpbox VM (Ubuntu 24.04, Standard_B2s) in snet-pe. Set false for headless/automated environments that do not need console access.')
-param deployBastion bool = true
+@description('Deploy Azure Bastion Standard host (~$140/mo). Default false per Phase 2a v3 budget plan — Bastion Developer (free portal-only RDP/SSH) is used instead. Set true only if you need a dedicated Bastion host with native client / multi-session support.')
+param deployBastion bool = false
+
+@description('Deploy a Linux jumpbox VM (Ubuntu 24.04, Standard_B2s) in snet-pe for in-VNet console / smoke-test access. ~$36/mo when running, $0 when deallocated. Default true per Phase 2a v3 plan — required because internal-only ingress blocks GitHub-runner curl.')
+param deployJumpbox bool = true
 
 @description('Enable availability-zone redundancy on resources that support it (Storage, Cosmos DB, ACR, etc.). Increases cost; recommended for prod.')
 param enableZoneRedundancy bool = false
@@ -112,11 +115,11 @@ param embeddingModel string = 'text-embedding-3-large'
 
 // ── SKUs ─────────────────────────────────────────────────────────────────────
 
-@description('Azure AI Search SKU. "standard" is recommended for production vector/hybrid search workloads.')
+@description('Azure AI Search SKU. Default "basic" per Phase 2a v3 budget plan (~$74/mo, supports private endpoints, 15 GB / 3 indexes — sufficient for demo). Use "standard" or higher for production vector/hybrid search workloads.')
 @allowed(['free', 'basic', 'standard', 'standard2', 'standard3'])
-param aiSearchSku string = 'standard'
+param aiSearchSku string = 'basic'
 
-@description('Azure API Management SKU. Both support internal VNet mode (zero public endpoints). "Developer" ~$60/mo for dev/test; "Premium" ~$2,800/mo required for production SLA and multi-region. StandardV2 is disqualified — it cannot run fully internal (violates SC-004).')
+@description('Azure API Management SKU. Default "Developer" per Phase 2a v3 budget plan (~$50/mo, internal VNet mode, no SLA — acceptable for demo). "Premium" (~$2,800/mo) required only for production SLA + multi-region. StandardV2 is disqualified — it cannot run fully internal (violates SC-004).')
 @allowed(['Developer', 'Premium'])
 param apimSku string = 'Developer'
 
@@ -131,13 +134,13 @@ param apimPublisherName string = 'RAG Accelerator'
 
 // ── Cost & Budget ────────────────────────────────────────────────────────────
 
-@description('Cosmos DB autoscale maximum throughput in RU/s. Minimum 1000 for autoscale mode.')
-@minValue(1000)
-param cosmosAutoscaleMaxRu int = 1000
+@description('Cosmos DB capacity mode. Default "Serverless" per Phase 2a v3 budget plan (~$3/mo for demo workload, pay-per-RU, no minimum). Use "Provisioned" for predictable production throughput with autoscale.')
+@allowed(['Serverless', 'Provisioned'])
+param cosmosCapacityMode string = 'Serverless'
 
-@description('Monthly spend threshold in USD. A budget alert fires when actual spend reaches 100% of this value.')
+@description('Monthly spend threshold in USD. A budget alert fires when actual spend reaches 100% of this value. Default 500 per Phase 2a v3 hard ceiling — total estimated demo cost is ~$318/mo with 36% headroom.')
 @minValue(100)
-param budgetMonthlyUsd int = 1000
+param budgetMonthlyUsd int = 500
 
 // =============================================================================
 // VARIABLES — Naming, tags, derived values
@@ -410,7 +413,7 @@ resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
 //     peSubnetId:                 network.outputs.snetPeId
 //     identityApiPrincipalId:     identity.outputs.identityApiPrincipalId
 //     identityIngestPrincipalId:  identity.outputs.identityIngestPrincipalId
-//     cosmosAutoscaleMaxRu:       cosmosAutoscaleMaxRu
+//     cosmosCapacityMode:         cosmosCapacityMode
 //     enableZoneRedundancy:       enableZoneRedundancy
 //     enableCustomerManagedKey:   enableCustomerManagedKey
 //     keyVaultId:                 keyvault.outputs.keyVaultId
@@ -480,8 +483,11 @@ resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
 
 // T028 / PR-N — Azure Bastion Standard + Linux jumpbox VM (Ubuntu 24.04, Standard_B2s) in snet-pe
 // NOTE: Jumpbox is in snet-pe (not a dedicated subnet) — conserves IP space; internal-only, MI-authenticated.
-// NOTE: Bastion is the ONLY resource with a public IP — documented exception to SC-004.
-// module bastion 'modules/bastion/main.bicep' = if (deployBastion) {
+// NOTE: Bastion Standard is the ONLY resource with a public IP — documented exception to SC-004.
+// NOTE: Phase 2a v3 budget plan defaults deployBastion=false / deployJumpbox=true — Bastion Developer
+//       (free portal-only RDP/SSH, shared MS pool) reaches the jumpbox without a deployed Bastion host.
+//       PR-N will split this into two `if (...)` modules: bastion-only and jumpbox-only.
+// module bastion 'modules/bastion/main.bicep' = if (deployBastion || deployJumpbox) {
 //   name: 'bastion'
 //   scope: rg
 //   dependsOn: [network]
