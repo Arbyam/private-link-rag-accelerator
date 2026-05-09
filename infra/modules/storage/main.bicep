@@ -1,36 +1,50 @@
 // =============================================================================
 // Module: storage
-// Task:   T022 (Phase 2a / PR-G)
+// Task:   T022 (Phase 2a / PR-G.1 — supersedes partial close in PR #12)
 // Purpose: Azure Storage Account (StorageV2 / Standard_LRS / Hot) configured for
-//          zero-trust ingestion: no public network, no shared keys (Entra-only),
-//          TLS 1.2, default-deny ACLs, five private endpoints (blob, file,
-//          table, dfs, queue), one pre-created blob container `documents`,
-//          and diagnostics shipped to a Log Analytics workspace.
+//          zero-trust ingestion:
+//          - publicNetworkAccess Disabled, networkAcls defaultAction Deny
+//          - allowSharedKeyAccess false (Entra-only) + defaultToOAuthAuthentication
+//          - allowBlobPublicAccess false, minimumTlsVersion TLS1_2
+//          - 2 private endpoints (blob + queue) into snet-pe — file/table/dfs PEs
+//            dropped per Ripley phase-2-plan row 13 (we use neither file shares,
+//            table storage, nor hierarchical namespace; cost saving ~$22/mo).
+//          - 3 pre-created blob containers:
+//              * `shared-corpus`        — admin-curated KB
+//              * `user-uploads`         — per-user uploads (30-day lifecycle delete)
+//              * `eventgrid-deadletter` — Event Grid undelivered events
+//          - 1 pre-created queue `ingestion-events` — target of Event Grid
+//            subscription on shared-corpus blob events.
+//          - Blob soft-delete (7d) + container soft-delete (7d).
+//          - Lifecycle policy: delete blobs under `user-uploads/` prefix older
+//            than 30 days (mirrors conversation TTL — FR-005 / SC-012).
+//          - Event Grid system topic on the storage account, with a
+//            CloudEvents-1.0 subscription on Blob{Created,Deleted} for the
+//            `shared-corpus` container only — delivers to the
+//            `ingestion-events` storage queue (data-model.md §6).
+//          - Diagnostics shipped to a Log Analytics workspace (storage account
+//            metrics + blob-service logs + queue-service logs).
 //
-// Wiring contract:
-//   - Inputs:  peSubnetId (snet-pe), pdns*Id (one per sub-resource), lawId
-//   - Outputs: resourceId, name, primaryBlobEndpoint, documentsContainerName
-//
-// Notes:
-//   - Queue PE included per the locked Phase 2a decision
-//     (".squad/decisions.md" — resolved-question: queue PE added).
-//   - File/Table/DFS PEs are wired here even though the network module only
-//     emits Blob+Queue private DNS zones today; PR-O is responsible for
-//     supplying the additional zone IDs (or extending network/main.bicep).
-//   - This module is intentionally NOT referenced from infra/main.bicep yet —
-//     wiring lives in PR-O.
+// RBAC scoping:
+//   - Cross-module RBAC (app UAMIs → storage) is wired by PR-O (T029) — out
+//     of scope here.
+//   - Intra-module RBAC for the Event Grid system topic's system-assigned MI
+//     IS included here, because:
+//       (a) shared-key access is disabled, so EventGrid cannot fall back to
+//           internal key-based delivery; MI delivery is the only path, and
+//       (b) the topic, the queue, and the dead-letter container all live in
+//           this module — there is no cross-module dependency.
+//     Two assignments are emitted at storage-account scope:
+//       * Storage Queue Data Message Sender   (deliver to ingestion-events)
+//       * Storage Blob Data Contributor       (write to eventgrid-deadletter)
 // =============================================================================
 
-metadata name = 'Storage Account module'
+metadata name = 'Storage Account module (T022)'
 metadata description = '''
-StorageV2 (Standard_LRS, Hot) with zero-trust posture:
-- publicNetworkAccess Disabled, networkAcls defaultAction Deny
-- allowSharedKeyAccess false (Entra-only) + defaultToOAuthAuthentication
-- allowBlobPublicAccess false, minimumTlsVersion TLS1_2
-- 5 private endpoints (blob, file, table, dfs, queue) into snet-pe
-- Single private blob container `documents` for ingestion artifacts
-- Diagnostic settings shipped to Log Analytics
-Uses AVM `avm/res/storage/storage-account` for the heavy lifting.
+StorageV2 (Standard_LRS, Hot) with zero-trust posture, 3 containers, 1 queue,
+soft-delete, lifecycle policy on user-uploads, and an Event Grid system topic
+that streams shared-corpus blob events to a Storage Queue using CloudEvents 1.0.
+Built on AVM `avm/res/storage/storage-account` 0.27.1.
 '''
 
 targetScope = 'resourceGroup'
@@ -47,7 +61,7 @@ param name string
 @description('Azure region for the storage account.')
 param location string
 
-@description('Resource tags applied to the storage account and its private endpoints.')
+@description('Resource tags applied to the storage account, its private endpoints, and the Event Grid system topic.')
 param tags object = {}
 
 @description('Resource ID of the private-endpoint subnet (snet-pe).')
@@ -55,15 +69,6 @@ param peSubnetId string
 
 @description('Resource ID of the privatelink.blob.core.windows.net Private DNS Zone.')
 param pdnsBlobId string
-
-@description('Resource ID of the privatelink.file.core.windows.net Private DNS Zone.')
-param pdnsFileId string
-
-@description('Resource ID of the privatelink.table.core.windows.net Private DNS Zone.')
-param pdnsTableId string
-
-@description('Resource ID of the privatelink.dfs.core.windows.net Private DNS Zone.')
-param pdnsDfsId string
 
 @description('Resource ID of the privatelink.queue.core.windows.net Private DNS Zone.')
 param pdnsQueueId string
@@ -75,12 +80,25 @@ param lawId string
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-var documentsContainer = 'documents'
+var sharedCorpusContainer = 'shared-corpus'
+var userUploadsContainer = 'user-uploads'
+var deadLetterContainer = 'eventgrid-deadletter'
+var ingestionQueue = 'ingestion-events'
+
+// Built-in role definition IDs (subscription-scope)
+var roleQueueDataMessageSender = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  'c6a89b2d-59bc-44d0-9896-0f6e12d7b80a'
+)
+var roleBlobDataContributor = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage Account (AVM)
 // Reference: https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/storage/storage-account
-// Pinned to 0.27.1 (latest 0.27.x as of 2026-05-08).
+// Pinned to 0.27.1.
 // ─────────────────────────────────────────────────────────────────────────────
 
 module storage 'br/public:avm/res/storage/storage-account:0.27.1' = {
@@ -108,17 +126,78 @@ module storage 'br/public:avm/res/storage/storage-account:0.27.1' = {
       virtualNetworkRules: []
     }
 
-    // --- Pre-created blob container (private access) ---
+    // --- Blob services: 3 private containers + soft-delete (7d) ---
     blobServices: {
+      deleteRetentionPolicyEnabled: true
+      deleteRetentionPolicyDays: 7
+      containerDeleteRetentionPolicyEnabled: true
+      containerDeleteRetentionPolicyDays: 7
+      diagnosticSettings: [
+        {
+          name: 'diag-blob-to-law'
+          workspaceResourceId: lawId
+        }
+      ]
       containers: [
         {
-          name: documentsContainer
+          name: sharedCorpusContainer
+          publicAccess: 'None'
+        }
+        {
+          name: userUploadsContainer
+          publicAccess: 'None'
+        }
+        {
+          name: deadLetterContainer
           publicAccess: 'None'
         }
       ]
     }
 
-    // --- Five private endpoints into snet-pe ---
+    // --- Queue service: ingestion-events queue (Event Grid subscription target) ---
+    queueServices: {
+      diagnosticSettings: [
+        {
+          name: 'diag-queue-to-law'
+          workspaceResourceId: lawId
+        }
+      ]
+      queues: [
+        {
+          name: ingestionQueue
+          metadata: {}
+        }
+      ]
+    }
+
+    // --- Lifecycle policy: delete blobs under user-uploads/ older than 30 days
+    //     (FR-005 / SC-012). Does NOT touch shared-corpus.
+    managementPolicyRules: [
+      {
+        name: 'expire-user-uploads-30d'
+        enabled: true
+        type: 'Lifecycle'
+        definition: {
+          actions: {
+            baseBlob: {
+              delete: {
+                daysAfterModificationGreaterThan: 30
+              }
+            }
+          }
+          filters: {
+            blobTypes: [
+              'blockBlob'
+            ]
+            prefixMatch: [
+              '${userUploadsContainer}/'
+            ]
+          }
+        }
+      }
+    ]
+
+    // --- Two private endpoints into snet-pe (blob + queue) ---
     privateEndpoints: [
       {
         name: 'pe-${name}-blob'
@@ -128,45 +207,6 @@ module storage 'br/public:avm/res/storage/storage-account:0.27.1' = {
           privateDnsZoneGroupConfigs: [
             {
               privateDnsZoneResourceId: pdnsBlobId
-            }
-          ]
-        }
-        tags: tags
-      }
-      {
-        name: 'pe-${name}-file'
-        service: 'file'
-        subnetResourceId: peSubnetId
-        privateDnsZoneGroup: {
-          privateDnsZoneGroupConfigs: [
-            {
-              privateDnsZoneResourceId: pdnsFileId
-            }
-          ]
-        }
-        tags: tags
-      }
-      {
-        name: 'pe-${name}-table'
-        service: 'table'
-        subnetResourceId: peSubnetId
-        privateDnsZoneGroup: {
-          privateDnsZoneGroupConfigs: [
-            {
-              privateDnsZoneResourceId: pdnsTableId
-            }
-          ]
-        }
-        tags: tags
-      }
-      {
-        name: 'pe-${name}-dfs'
-        service: 'dfs'
-        subnetResourceId: peSubnetId
-        privateDnsZoneGroup: {
-          privateDnsZoneGroupConfigs: [
-            {
-              privateDnsZoneResourceId: pdnsDfsId
             }
           ]
         }
@@ -187,7 +227,8 @@ module storage 'br/public:avm/res/storage/storage-account:0.27.1' = {
       }
     ]
 
-    // --- Diagnostics → Log Analytics ---
+    // --- Account-level diagnostics (metrics only — log categories live on the
+    //     blob/queue sub-services above) ---
     diagnosticSettings: [
       {
         name: 'diag-to-law'
@@ -203,6 +244,138 @@ module storage 'br/public:avm/res/storage/storage-account:0.27.1' = {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Existing-resource handles (for the Event Grid system topic, RBAC scoping,
+// and dead-letter wiring). These reference the resources created by the AVM
+// module above, so they implicitly depend on it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+resource sa 'Microsoft.Storage/storageAccounts@2024-01-01' existing = {
+  name: name
+  dependsOn: [
+    storage
+  ]
+}
+
+resource saQueueService 'Microsoft.Storage/storageAccounts/queueServices@2024-01-01' existing = {
+  parent: sa
+  name: 'default'
+}
+
+resource ingestionQueueRes 'Microsoft.Storage/storageAccounts/queueServices/queues@2024-01-01' existing = {
+  parent: saQueueService
+  name: ingestionQueue
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event Grid system topic on the storage account (hand-rolled — no AVM).
+// Reference: ripley/phase-2-plan.md §"AVM coverage" row "Event Grid System Topic".
+// ─────────────────────────────────────────────────────────────────────────────
+
+resource systemTopic 'Microsoft.EventGrid/systemTopics@2023-12-15-preview' = {
+  name: '${name}-evgt'
+  location: location
+  tags: tags
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    source: sa.id
+    topicType: 'Microsoft.Storage.StorageAccounts'
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RBAC for the system topic's MI (intra-module — see header comment).
+//   - Storage Queue Data Message Sender → deliver events to ingestion-events
+//   - Storage Blob Data Contributor     → write dead-lettered events to
+//                                          eventgrid-deadletter container
+// Both scoped to the storage account (queue / container scopes are not
+// supported targets for principal-based assignments emitted from Bicep at
+// resource-group scope without extra parent indirection; account scope is
+// the documented pattern for Event Grid → Storage MI delivery).
+// ─────────────────────────────────────────────────────────────────────────────
+
+resource raQueueSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: sa
+  name: guid(sa.id, systemTopic.id, 'queue-sender')
+  properties: {
+    principalId: systemTopic.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleQueueDataMessageSender
+  }
+}
+
+resource raDeadLetterWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: sa
+  name: guid(sa.id, systemTopic.id, 'dlq-writer')
+  properties: {
+    principalId: systemTopic.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleBlobDataContributor
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event Grid subscription:
+//   - Filter: subjectBeginsWith /blobServices/default/containers/shared-corpus/
+//   - Event types: Microsoft.Storage.BlobCreated / BlobDeleted
+//   - Destination: StorageQueue → ingestion-events (delivered with system MI)
+//   - Schema: CloudEvents 1.0 (matches contracts/ingestion-event.schema.json)
+//   - Dead-letter: same storage account, eventgrid-deadletter container
+//   - Retry: 30 attempts, TTL 60 minutes (= PT1H)
+// ─────────────────────────────────────────────────────────────────────────────
+
+resource sharedCorpusSubscription 'Microsoft.EventGrid/systemTopics/eventSubscriptions@2023-12-15-preview' = {
+  parent: systemTopic
+  name: 'shared-corpus-to-queue'
+  properties: {
+    eventDeliverySchema: 'CloudEventSchemaV1_0'
+    filter: {
+      subjectBeginsWith: '/blobServices/default/containers/${sharedCorpusContainer}/'
+      includedEventTypes: [
+        'Microsoft.Storage.BlobCreated'
+        'Microsoft.Storage.BlobDeleted'
+      ]
+      enableAdvancedFilteringOnArrays: true
+    }
+    deliveryWithResourceIdentity: {
+      identity: {
+        type: 'SystemAssigned'
+      }
+      destination: {
+        endpointType: 'StorageQueue'
+        properties: {
+          resourceId: sa.id
+          queueName: ingestionQueue
+          queueMessageTimeToLiveInSeconds: 3600
+        }
+      }
+    }
+    deadLetterWithResourceIdentity: {
+      identity: {
+        type: 'SystemAssigned'
+      }
+      deadLetterDestination: {
+        endpointType: 'StorageBlob'
+        properties: {
+          resourceId: sa.id
+          blobContainerName: deadLetterContainer
+        }
+      }
+    }
+    retryPolicy: {
+      maxDeliveryAttempts: 30
+      eventTimeToLiveInMinutes: 60
+    }
+  }
+  dependsOn: [
+    raQueueSender
+    raDeadLetterWriter
+    ingestionQueueRes
+  ]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Outputs — consumed by PR-O wiring layer
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -215,5 +388,14 @@ output name string = storage.outputs.name
 @description('Primary blob endpoint (https://<name>.blob.core.windows.net/).')
 output primaryBlobEndpoint string = storage.outputs.primaryBlobEndpoint
 
-@description('Name of the pre-created blob container for ingestion artifacts.')
-output documentsContainerName string = documentsContainer
+@description('Name of the admin-curated KB blob container.')
+output sharedCorpusContainerName string = sharedCorpusContainer
+
+@description('Name of the per-user upload blob container (subject to 30-day lifecycle delete).')
+output userUploadsContainerName string = userUploadsContainer
+
+@description('Name of the storage queue that receives Event Grid blob events for shared-corpus.')
+output ingestionQueueName string = ingestionQueue
+
+@description('Resource ID of the Event Grid system topic on the storage account (PR-O may grant additional senders).')
+output eventGridSystemTopicId string = systemTopic.id
