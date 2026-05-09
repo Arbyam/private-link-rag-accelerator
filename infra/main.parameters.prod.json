@@ -79,6 +79,12 @@
     },
     "budgetMonthlyUsd": {
       "value": 500
+    },
+    "jumpboxAdminUsername": {
+      "value": "azureuser"
+    },
+    "jumpboxAdminPublicKey": {
+      "value": "__SSH_PUBLIC_KEY__"
     }
   }
 }

@@ -67,6 +67,9 @@ param documentsContainerName string = 'documents'
 @description('Ingestion telemetry container. PK `/scope`, default TTL 90 days.')
 param ingestionRunsContainerName string = 'ingestion-runs'
 
+@description('Principal IDs that receive the built-in `Cosmos DB Built-in Data Contributor` SQL role on this account (data plane — read/write all containers in the SQL API). Wired by PR-O / T029 — typically api + ingest UAMIs.')
+param dataContributorPrincipalIds array = []
+
 // -----------------------------------------------------------------------------
 // AVM: Cosmos DB account
 // Reference: https://github.com/Azure/bicep-registry-modules/tree/main/avm/res/document-db/database-account
@@ -199,6 +202,34 @@ module account 'br/public:avm/res/document-db/database-account:0.15.1' = {
     ]
   }
 }
+
+// -----------------------------------------------------------------------------
+// Cosmos DB data-plane RBAC (T029 / PR-O)
+// -----------------------------------------------------------------------------
+// Cosmos data-plane access is NOT controlled by Azure RBAC role assignments;
+// it uses Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments with the
+// built-in role `00000000-0000-0000-0000-000000000002` (Cosmos DB Built-in
+// Data Contributor). `disableLocalAuthentication: true` above means MI is the
+// only path to data — there is no key fallback.
+// -----------------------------------------------------------------------------
+resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existing = {
+  name: name
+  dependsOn: [
+    account
+  ]
+}
+
+var cosmosBuiltInDataContributorRoleId = '${cosmosAccount.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002'
+
+resource cosmosDataContributorAssignments 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = [for principalId in dataContributorPrincipalIds: {
+  parent: cosmosAccount
+  name: guid(cosmosAccount.id, principalId, '00000000-0000-0000-0000-000000000002')
+  properties: {
+    roleDefinitionId: cosmosBuiltInDataContributorRoleId
+    principalId: principalId
+    scope: cosmosAccount.id
+  }
+}]
 
 // -----------------------------------------------------------------------------
 // Outputs — consumed by PR-O (T029/T030) wiring layer.
