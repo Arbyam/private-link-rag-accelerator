@@ -6,13 +6,14 @@ How to decide who handles what.
 
 | Work Type | Route To | Examples |
 |-----------|----------|----------|
-| {domain 1} | {Name} | {example tasks} |
-| {domain 2} | {Name} | {example tasks} |
-| {domain 3} | {Name} | {example tasks} |
-| Code review | {Name} | Review PRs, check quality, suggest improvements |
-| Testing | {Name} | Write tests, find edge cases, verify fixes |
-| Scope & priorities | {Name} | What to build next, trade-offs, decisions |
+| Bicep, AVM, networking, private endpoints, IaC | Dallas | T015–T032, infra modules, network topology |
+| Python, FastAPI, Azure SDKs, API implementation | Kane | T033–T042, apps/api/, apps/ingest/, RAG pipeline |
+| Next.js, TypeScript, React, Tailwind, UI | Lambert | T006, T009, T043–T045, apps/web/, components |
+| Tests, Playwright, pytest, isolation proofs | Parker | Unit/integration/E2E tests, SC-002/004/011 verification |
+| Code review | Ripley | Review PRs, architecture decisions, security gates |
+| Scope & priorities | Ripley | What to build next, trade-offs, escalations |
 | Session logging | Scribe | Automatic — never needs routing |
+| Work queue monitoring | Ralph | Backlog status, issue triage queue |
 
 ## Issue Routing
 

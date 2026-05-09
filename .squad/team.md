@@ -12,6 +12,13 @@
 
 | Name | Role | Charter | Status |
 |------|------|---------|--------|
+| Ripley | Lead | [charter](agents/ripley/charter.md) | 🟢 Active |
+| Dallas | Infra Specialist (Bicep/AVM) | [charter](agents/dallas/charter.md) | 🟢 Active |
+| Kane | Backend Specialist (Python/FastAPI) | [charter](agents/kane/charter.md) | 🟢 Active |
+| Lambert | Frontend Specialist (Next.js 15) | [charter](agents/lambert/charter.md) | 🟢 Active |
+| Parker | Tester | [charter](agents/parker/charter.md) | 🟢 Active |
+| Scribe | Session Logger | [charter](agents/scribe/charter.md) | 🟢 Active |
+| Ralph | Work Monitor | [charter](agents/ralph/charter.md) | 🟢 Active |
 
 ## Project Context
 
