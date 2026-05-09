@@ -46,6 +46,10 @@ class Settings(BaseSettings):
 
     # Cosmos DB
     COSMOS_ACCOUNT_ENDPOINT: Annotated[str, Field(min_length=1)]
+    COSMOS_DATABASE: str = "rag"
+    COSMOS_CONTAINER_CONVERSATIONS: str = "conversations"
+    COSMOS_CONTAINER_DOCUMENTS: str = "documents"
+    COSMOS_CONTAINER_INGESTION_RUNS: str = "ingestion-runs"
 
     # Azure AI Search
     SEARCH_ENDPOINT: Annotated[str, Field(min_length=1)]
