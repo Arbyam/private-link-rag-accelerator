@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.private-rag-accelerator/ingestion-event-v1.json",
+  "title": "Shared corpus ingestion event (CloudEvents 1.0)",
+  "type": "object",
+  "required": ["specversion", "type", "source", "id", "time", "data"],
+  "properties": {
+    "specversion": { "const": "1.0" },
+    "type": {
+      "enum": [
+        "Microsoft.Storage.BlobCreated",
+        "Microsoft.Storage.BlobDeleted"
+      ]
+    },
+    "source": { "type": "string", "format": "uri" },
+    "id": { "type": "string" },
+    "time": { "type": "string", "format": "date-time" },
+    "subject": {
+      "type": "string",
+      "description": "/blobServices/default/containers/shared-corpus/blobs/<path>"
+    },
+    "datacontenttype": { "const": "application/cloudevents+json" },
+    "data": {
+      "type": "object",
+      "required": ["url", "contentType"],
+      "properties": {
+        "api": { "type": "string" },
+        "url": { "type": "string", "format": "uri" },
+        "contentType": { "type": "string" },
+        "contentLength": { "type": "integer", "minimum": 0 },
+        "eTag": { "type": "string" }
+      }
+    }
+  }
+}

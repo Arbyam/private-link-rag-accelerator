@@ -1,0 +1,71 @@
+{
+  "id": "conversations",
+  "partitionKey": {
+    "paths": ["/userId"],
+    "kind": "Hash",
+    "version": 2
+  },
+  "defaultTtl": 2592000,
+  "indexingPolicy": {
+    "indexingMode": "consistent",
+    "automatic": true,
+    "includedPaths": [{ "path": "/*" }],
+    "excludedPaths": [
+      { "path": "/turns/*" },
+      { "path": "/_etag/?" }
+    ]
+  },
+  "uniqueKeyPolicy": {
+    "uniqueKeys": [{ "paths": ["/id"] }]
+  },
+  "documentJsonSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "Conversation",
+    "type": "object",
+    "required": ["id", "userId", "title", "createdAt", "updatedAt", "turns", "status"],
+    "properties": {
+      "id": { "type": "string", "pattern": "^c_[0-9A-HJKMNP-TV-Z]{26}$" },
+      "userId": { "type": "string", "pattern": "^oid:[0-9a-f-]{36}$" },
+      "title": { "type": "string", "maxLength": 200 },
+      "createdAt": { "type": "string", "format": "date-time" },
+      "updatedAt": { "type": "string", "format": "date-time" },
+      "turns": {
+        "type": "array",
+        "maxItems": 200,
+        "items": {
+          "type": "object",
+          "required": ["turnId", "role", "content", "createdAt"],
+          "properties": {
+            "turnId": { "type": "string" },
+            "role": { "enum": ["user", "assistant"] },
+            "content": { "type": "string", "maxLength": 8000 },
+            "createdAt": { "type": "string", "format": "date-time" },
+            "citations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["passageId", "documentId", "scope"],
+                "properties": {
+                  "passageId": { "type": "string" },
+                  "documentId": { "type": "string" },
+                  "scope": { "type": "string", "pattern": "^(shared|user:oid:[0-9a-f-]{36})$" },
+                  "page": { "type": "integer", "minimum": 1 },
+                  "snippet": { "type": "string", "maxLength": 1000 },
+                  "score": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              }
+            },
+            "model": { "type": "string" },
+            "promptTokens": { "type": "integer", "minimum": 0 },
+            "completionTokens": { "type": "integer", "minimum": 0 }
+          }
+        }
+      },
+      "uploadedDocumentIds": {
+        "type": "array",
+        "items": { "type": "string", "pattern": "^d_[0-9A-HJKMNP-TV-Z]{26}$" }
+      },
+      "status": { "enum": ["active", "deletePending"] }
+    }
+  }
+}
