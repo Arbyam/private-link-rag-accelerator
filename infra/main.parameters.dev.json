@@ -1,0 +1,81 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "namingPrefix": {
+      "value": "rag"
+    },
+    "location": {
+      "value": "eastus2"
+    },
+    "environmentName": {
+      "value": "dev"
+    },
+    "adminGroupObjectId": {
+      "value": ""
+    },
+    "allowedUserGroupObjectIds": {
+      "value": []
+    },
+    "costCenter": {
+      "value": "platform"
+    },
+    "owner": {
+      "value": "platform-team"
+    },
+    "vnetAddressPrefix": {
+      "value": "10.0.0.0/22"
+    },
+    "snetAcaPrefix": {
+      "value": "10.0.0.0/24"
+    },
+    "snetPePrefix": {
+      "value": "10.0.1.0/24"
+    },
+    "snetJobsPrefix": {
+      "value": "10.0.2.0/24"
+    },
+    "snetBastionPrefix": {
+      "value": "10.0.3.0/26"
+    },
+    "snetApimPrefix": {
+      "value": "10.0.3.64/27"
+    },
+    "customerProvidedDns": {
+      "value": false
+    },
+    "deployBastion": {
+      "value": true
+    },
+    "enableZoneRedundancy": {
+      "value": false
+    },
+    "enableCustomerManagedKey": {
+      "value": false
+    },
+    "chatModel": {
+      "value": "gpt-5"
+    },
+    "embeddingModel": {
+      "value": "text-embedding-3-large"
+    },
+    "aiSearchSku": {
+      "value": "basic"
+    },
+    "apimSku": {
+      "value": "Developer"
+    },
+    "apimPublisherEmail": {
+      "value": "azd@example.com"
+    },
+    "apimPublisherName": {
+      "value": "RAG Accelerator"
+    },
+    "cosmosAutoscaleMaxRu": {
+      "value": 1000
+    },
+    "budgetMonthlyUsd": {
+      "value": 500
+    }
+  }
+}
