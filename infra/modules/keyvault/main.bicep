@@ -45,6 +45,27 @@ param secretsUserPrincipalIds array = []
 param adminGroupObjectId string = ''
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Role-assignment array assembly. Bicep disallows for-expressions inside
+// concat()/union() function calls, so we build each segment as its own var
+// and concat the vars (vars accept for-expressions).
+// ─────────────────────────────────────────────────────────────────────────────
+var secretsUserRoleAssignments = [for principalId in secretsUserPrincipalIds: {
+  roleDefinitionIdOrName: 'Key Vault Secrets User'
+  principalId: principalId
+  principalType: 'ServicePrincipal'
+}]
+
+var adminRoleAssignment = empty(adminGroupObjectId) ? [] : [
+  {
+    roleDefinitionIdOrName: 'Key Vault Administrator'
+    principalId: adminGroupObjectId
+    principalType: 'Group'
+  }
+]
+
+var kvRoleAssignments = concat(secretsUserRoleAssignments, adminRoleAssignment)
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Key Vault (AVM)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -93,6 +114,13 @@ module vault 'br/public:avm/res/key-vault/vault:0.13.3' = {
       }
     ]
 
+    // RBAC — AVM's native roleAssignments param emits the assignments as
+    // child resources of the vault, so the resource graph guarantees they
+    // sequence after vault creation. The previous standalone-resource +
+    // `existing` pattern raced the registry-graph propagation and failed
+    // with `RoleDefinitionDoesNotExist`.
+    roleAssignments: kvRoleAssignments
+
     diagnosticSettings: [
       {
         name: 'diag-to-law'
@@ -113,45 +141,8 @@ module vault 'br/public:avm/res/key-vault/vault:0.13.3' = {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RBAC — Key Vault Secrets User (per-app MI) + Key Vault Administrator (admin
-// group, optional) — T029 / PR-O.
+// RBAC — handled inline via AVM's `roleAssignments` parameter (see above).
 // ─────────────────────────────────────────────────────────────────────────────
-
-var roleKvSecretsUser = subscriptionResourceId(
-  'Microsoft.Authorization/roleDefinitions',
-  '4633458b-17de-405f-8413-bb6c98b6a3c6'
-)
-var roleKvAdmin = subscriptionResourceId(
-  'Microsoft.Authorization/roleDefinitions',
-  '00482a5a-887f-4fb3-b363-3b7fe8e74483'
-)
-
-resource kvExisting 'Microsoft.KeyVault/vaults@2024-04-01-preview' existing = {
-  name: vaultName
-  dependsOn: [
-    vault
-  ]
-}
-
-resource raSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in secretsUserPrincipalIds: {
-  scope: kvExisting
-  name: guid(kvExisting.id, principalId, 'KeyVaultSecretsUser')
-  properties: {
-    principalId: principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: roleKvSecretsUser
-  }
-}]
-
-resource raKvAdmin 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(adminGroupObjectId)) {
-  scope: kvExisting
-  name: guid(kvExisting.id, adminGroupObjectId, 'KeyVaultAdministrator')
-  properties: {
-    principalId: adminGroupObjectId
-    principalType: 'Group'
-    roleDefinitionId: roleKvAdmin
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Outputs

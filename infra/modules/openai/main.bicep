@@ -88,12 +88,12 @@ param embeddingDeploymentName string = 'text-embedding-3-large'
 @maxValue(1000)
 param embeddingCapacity int = 10
 
-@description('Model deployment SKU. Standard keeps the deployment region-locked, which is required for clean Private Link semantics. GlobalStandard would route requests across regions and is intentionally not the default.')
+@description('Model deployment SKU. ``GlobalStandard`` is the default (and is the only SKU that supports gpt-5 / 2025-08-07 — Azure rejects ``Standard`` for that model). Switch to ``Standard`` if you are deploying a model that supports it AND you need strict region-locked Private Link semantics.')
 @allowed([
   'Standard'
   'GlobalStandard'
 ])
-param deploymentSku string = 'Standard'
+param deploymentSku string = 'GlobalStandard'
 
 @description('Principal IDs that receive `Cognitive Services OpenAI User` on this account (call chat / embedding deployments). Wired by PR-O / T029 — typically api + ingest UAMIs.')
 param openAiUserPrincipalIds array = []
