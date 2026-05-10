@@ -60,6 +60,8 @@ export function ChatPane({
     if (!text || isStreaming) return;
     onSend(text);
     setDraft('');
+    // Keep focus in the textarea so a follow-up question is one keystroke away.
+    requestAnimationFrame(() => textareaRef.current?.focus());
   }, [draft, isStreaming, onSend]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -135,7 +137,7 @@ export function ChatPane({
               onClick={onStop}
               aria-label="Stop generating"
             >
-              <Square className="h-4 w-4" />
+              <Square className="h-4 w-4" aria-hidden="true" />
             </Button>
           ) : (
             <Button
@@ -143,9 +145,10 @@ export function ChatPane({
               size="icon"
               onClick={submit}
               disabled={!draft.trim() || isStreaming}
+              aria-disabled={!draft.trim() || isStreaming}
               aria-label="Send message"
             >
-              <Send className="h-4 w-4" />
+              <Send className="h-4 w-4" aria-hidden="true" />
             </Button>
           )}
         </div>

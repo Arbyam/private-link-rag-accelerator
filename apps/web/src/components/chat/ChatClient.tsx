@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ChatPane } from './ChatPane';
 import type { ChatMessage, Citation } from './types';
 import { readSseStream } from '@/lib/sse';
+import { useAnnouncer } from '@/components/shell/LiveRegion';
 
 /**
  * Client-side chat shell (T087).
@@ -38,6 +39,7 @@ export function ChatClient({
   apiBaseUrl,
 }: ChatClientProps) {
   const router = useRouter();
+  const { announce } = useAnnouncer();
   const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [error, setError] = React.useState<SendError | null>(null);
@@ -80,6 +82,7 @@ export function ChatClient({
       };
       setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
       setIsStreaming(true);
+      announce('Assistant is responding…', 'polite');
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -131,6 +134,7 @@ export function ChatClient({
               conversationIdRef.current = payload.conversationId;
             }
             updateTrailingAssistant((m) => ({ ...m, isStreaming: false }));
+            announce('Assistant response complete.', 'polite');
             if (isNewConversation && conversationIdRef.current) {
               // Replace URL so refresh / back-button hydrates from /conversations/{id}.
               router.replace(`/chat/${conversationIdRef.current}`);
@@ -151,6 +155,7 @@ export function ChatClient({
               ? err.message
               : 'Something went wrong.';
         setError({ message });
+        announce(message, 'assertive');
         updateTrailingAssistant((m) => ({
           ...m,
           isStreaming: false,
@@ -161,7 +166,7 @@ export function ChatClient({
         abortRef.current = null;
       }
     },
-    [accessToken, baseUrl, isStreaming, router, updateTrailingAssistant]
+    [accessToken, announce, baseUrl, isStreaming, router, updateTrailingAssistant]
   );
 
   const handleCitationActivate = React.useCallback(
