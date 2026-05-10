@@ -39,11 +39,13 @@ SSE wire format (every event ends with a blank line — i.e. ``\\n\\n``)::
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
 from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
@@ -244,6 +246,20 @@ def _used_citations(text: str, hits: list[SearchHit]) -> list[Citation]:
     return citations
 
 
+def _hash_oid(oid: str) -> str:
+    """Stable, non-reversible 8-char correlation id for a user oid.
+
+    Used in log records (US6 admin dashboard, T091) so we can group
+    events by caller without ever persisting the raw oid in telemetry.
+    """
+    return hashlib.sha256(oid.encode("utf-8")).hexdigest()[:8]
+
+
+def _elapsed_ms(start: float) -> int:
+    """Milliseconds since ``start`` (a ``perf_counter()`` value) as int."""
+    return int((perf_counter() - start) * 1000)
+
+
 def _format_sse(event: str, payload: dict[str, Any]) -> bytes:
     """Render a single SSE event frame: ``event: <name>\\ndata: <json>\\n\\n``.
 
@@ -282,6 +298,9 @@ async def post_chat(
     search: Annotated[ScopedSearchClient, Depends(_search_client)],
     cosmos_client: Annotated[Any, Depends(_cosmos_client_dep)],
 ) -> StreamingResponse:
+    request_start = perf_counter()
+    user_oid_hash = _hash_oid(user.oid)
+
     # ------------------------------------------------------------------
     # 1) Load or mint conversation. We do this *before* opening the SSE
     #    stream so 401/404 surface as plain HTTP errors (the web client
@@ -308,28 +327,42 @@ async def post_chat(
         is_new = True
 
     _log.info(
-        "chat_request_start",
-        user_oid=user.oid,
-        conversation_id=record.id,
-        is_new_conversation=is_new,
-        history_turns=len(record.turns),
+        "chat.request.start",
+        conversationId=record.id,
+        userOidHash=user_oid_hash,
+        messageLen=len(body.message),
+        isNewConversation=is_new,
+        historyTurns=len(record.turns),
     )
 
     async def _stream() -> AsyncIterator[bytes]:
         accumulated: list[str] = []
         hits: list[SearchHit] = []
+        retrieval_count = 0
+        assistant_turn_id = _new_turn_id()
         try:
             # ----------------------------------------------------------
             # 2) Hybrid search (mandatory scope filter applied by the
             #    wrapper — never trust the caller for `scope`).
             # ----------------------------------------------------------
             retrieval_query = _build_retrieval_query(body.message, record.turns)
+            search_start = perf_counter()
             results: SearchResults = await search.search_combined(
                 retrieval_query,
                 oid=user.oid,
                 top=_DEFAULT_TOP_K,
             )
+            search_latency_ms = _elapsed_ms(search_start)
             hits = list(results.documents)
+            retrieval_count = len(hits)
+            top_score = round(hits[0].score, 4) if hits else 0.0
+            _log.info(
+                "chat.retrieval.complete",
+                conversationId=record.id,
+                retrievalCount=retrieval_count,
+                topScore=top_score,
+                searchLatencyMs=search_latency_ms,
+            )
 
             # ----------------------------------------------------------
             # 3) System prompt (admin-overridable, falls back to default
@@ -351,6 +384,7 @@ async def post_chat(
             #    events; we relay deltas, swallow the LLM's own done,
             #    and convert its error into our SSE error frame.
             # ----------------------------------------------------------
+            llm_start = perf_counter()
             async for ev in llm.chat_stream(messages):
                 if isinstance(ev, ChatStreamDelta):
                     text = ev.data.get("text", "")
@@ -363,8 +397,10 @@ async def post_chat(
                 # ChatStreamDone / ChatStreamCitations from the LLM layer
                 # are intentionally not relayed — we synthesize our own
                 # final frames below so the wire format is deterministic.
+            llm_latency_ms = _elapsed_ms(llm_start)
 
             full_text = "".join(accumulated)
+            tokens_streamed = len(full_text)
             declined = full_text.strip().startswith(DECLINE_PHRASE)
 
             # ----------------------------------------------------------
@@ -388,7 +424,6 @@ async def post_chat(
                 citations=None,
                 createdAt=now,
             )
-            assistant_turn_id = _new_turn_id()
             assistant_turn = Turn(
                 turnId=assistant_turn_id,
                 role=TurnRole.ASSISTANT,
@@ -406,19 +441,33 @@ async def post_chat(
                 await repo.upsert(record)
             except AppError as exc:  # log but don't fail the already-streamed reply
                 _log.warning(
-                    "chat_turn_persist_failed",
-                    conversation_id=record.id,
-                    error=exc.code,
+                    "chat.turn.persist_failed",
+                    conversationId=record.id,
+                    errorCode=exc.code,
                 )
 
-            _log.info(
-                "chat_request_done",
-                user_oid=user.oid,
-                conversation_id=record.id,
-                retrieval_hits=len(hits),
-                declined=declined,
-                output_chars=len(full_text),
-            )
+            total_latency_ms = _elapsed_ms(request_start)
+            if declined:
+                _log.info(
+                    "chat.response.declined",
+                    conversationId=record.id,
+                    turnId=assistant_turn_id,
+                    declined=True,
+                    citationsEmitted=0,
+                    retrievalCount=retrieval_count,
+                    totalLatencyMs=total_latency_ms,
+                )
+            else:
+                _log.info(
+                    "chat.response.complete",
+                    conversationId=record.id,
+                    turnId=assistant_turn_id,
+                    declined=False,
+                    citationsEmitted=len(citations),
+                    tokensStreamed=tokens_streamed,
+                    llmLatencyMs=llm_latency_ms,
+                    totalLatencyMs=total_latency_ms,
+                )
 
             # ----------------------------------------------------------
             # 7) Terminal `done` frame — carries enough state for the
@@ -435,17 +484,23 @@ async def post_chat(
                 },
             )
         except AppError as exc:
-            _log.warning(
-                "chat_stream_app_error",
-                conversation_id=record.id,
-                code=exc.code,
+            _log.error(
+                "chat.response.error",
+                conversationId=record.id,
+                errorCode=exc.code,
+                errorMessage=exc.message,
+                totalLatencyMs=_elapsed_ms(request_start),
+                exc_info=True,
             )
             yield _format_sse("error", {"code": exc.code, "message": exc.message})
         except Exception as exc:  # noqa: BLE001 — last-resort SSE error frame
-            _log.exception(
-                "chat_stream_unhandled_error",
-                conversation_id=record.id,
-                error_type=type(exc).__name__,
+            _log.error(
+                "chat.response.error",
+                conversationId=record.id,
+                errorCode="internal_error",
+                errorMessage=type(exc).__name__,
+                totalLatencyMs=_elapsed_ms(request_start),
+                exc_info=True,
             )
             yield _format_sse(
                 "error",
