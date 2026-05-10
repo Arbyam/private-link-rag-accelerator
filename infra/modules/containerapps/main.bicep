@@ -161,11 +161,11 @@ module env 'br/public:avm/res/app/managed-environment:0.13.3' = {
     // internal=true → no public load balancer; all ingress is VNet-internal.
     internal: true
     infrastructureSubnetResourceId: peSubnetId
-    // publicNetworkAccess controls the management plane to the env. Leave
-    // 'Enabled' so `azd deploy` revision updates work via ARM without
-    // requiring jumpbox/Bastion. Data-plane ingress is still VNet-only via
-    // internal=true.
-    publicNetworkAccess: 'Enabled'
+    // publicNetworkAccess MUST be 'Disabled' when internal=true (ARM rejects
+     // 'Enabled' with ManagedEnvironmentInvalidPublicNetworkAccessWithInternal).
+     // Data-plane ingress is VNet-only via internal=true; `azd deploy` revision
+     // updates still work via ARM/management-plane regardless.
+    publicNetworkAccess: 'Disabled'
 
     // --- Cost: Consumption profile only (LOCKED — Phase 2 plan row 9) ---
     workloadProfiles: [
@@ -241,9 +241,10 @@ module webApp 'br/public:avm/res/app/container-app:0.22.1' = {
     containers: [
       {
         name: 'web'
-        image: '${acrLoginServer}/web:placeholder'
+        image: 'mcr.microsoft.com/k8se/quickstart:latest'
         resources: {
-          cpu: json('0.5')
+          #disable-next-line BCP036
+          cpu: '0.5'
           memory: '1Gi'
         }
         env: webEnvArray
@@ -311,9 +312,10 @@ module apiApp 'br/public:avm/res/app/container-app:0.22.1' = {
     containers: [
       {
         name: 'api'
-        image: '${acrLoginServer}/api:placeholder'
+        image: 'mcr.microsoft.com/k8se/quickstart:latest'
         resources: {
-          cpu: json('0.5')
+          #disable-next-line BCP036
+          cpu: '0.5'
           memory: '1Gi'
         }
         env: apiEnvArray
@@ -419,9 +421,10 @@ module ingestJob 'br/public:avm/res/app/job:0.7.1' = {
     containers: [
       {
         name: 'ingest'
-        image: '${acrLoginServer}/ingest:placeholder'
+        image: 'mcr.microsoft.com/k8se/quickstart:latest'
         resources: {
-          cpu: json('1.0')
+          #disable-next-line BCP036
+          cpu: '1.0'
           memory: '2Gi'
         }
         env: ingestEnvArray
