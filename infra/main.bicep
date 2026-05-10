@@ -97,8 +97,8 @@ param customerProvidedDns bool = false
 @description('Deploy Azure Bastion Standard host (~$140/mo). Default false per Phase 2a v3 budget plan — Bastion Developer (free portal-only RDP/SSH) is used instead. Set true only if you need a dedicated Bastion host with native client / multi-session support.')
 param deployBastion bool = false
 
-@description('Deploy a Linux jumpbox VM (Ubuntu 24.04, Standard_B2s) in snet-pe for in-VNet console / smoke-test access. ~$36/mo when running, $0 when deallocated. Default true per Phase 2a v3 plan — required because internal-only ingress blocks GitHub-runner curl.')
-param deployJumpbox bool = true
+@description('Deploy a Linux jumpbox VM (Ubuntu 24.04, Standard_B2s) in snet-pe for in-VNet console / smoke-test access. ~$36/mo when running, $0 when deallocated. **Default false** to unblock initial deploys when SSH key handling is unverified — flip to true after first successful provision and the operator has confirmed `jumpboxAdminPublicKey` is correctly piped through azd.')
+param deployJumpbox bool = false
 
 @description('Enable availability-zone redundancy on resources that support it (Storage, Cosmos DB, ACR, etc.). Increases cost; recommended for prod. Currently locked OFF in modules per Phase 2a v3 cost plan; surfaced here for Phase 2b zone-redundant variants.')
 #disable-next-line no-unused-params
@@ -158,6 +158,9 @@ param jumpboxAdminPublicKey string = ''
 @description('Linux admin username for the jumpbox VM.')
 param jumpboxAdminUsername string = 'azureuser'
 
+@description('Optional override for the AI Search service region. Defaults to ``eastus`` because eastus2 commonly hits ``InsufficientResourcesAvailable`` on Search Basic SKU. Set to empty string to use the platform ``location``. The Private DNS zone ``privatelink.search.windows.net`` is global, so cross-region Search behind a same-VNet PE is supported.')
+param searchLocation string = 'eastus'
+
 // =============================================================================
 // VARIABLES — Naming, tags, derived values
 // =============================================================================
@@ -190,6 +193,13 @@ var regionShort = regionShortMap[?location] ?? location
 // Base token shared by most resource names
 var baseName = '${namingPrefix}-${environmentName}-${regionShort}'
 
+// Short deterministic suffix derived from the subscription + base name. Used to
+// disambiguate globally-unique DNS names (Key Vault, Azure OpenAI subdomain,
+// APIM gateway, Cognitive Search) so the same accelerator can deploy on
+// subscriptions where another tenant happens to own `<name>.<service>.azure.com`.
+// Length 6 keeps every resulting name well under each service's max length.
+var globalUniqSuffix = take(uniqueString(subscription().subscriptionId, baseName), 6)
+
 // Deterministic resource name map (one source of truth — no naming scattered across modules)
 var names = {
   resourceGroup:  'rg-${baseName}'
@@ -207,14 +217,15 @@ var names = {
   ampls:          'ampls-${baseName}'
   // ACR: alphanumeric only, no hyphens
   acr:            replace('acr${namingPrefix}${environmentName}${regionShort}', '-', '')
-  keyvault:       'kv-${baseName}'
+  // Globally-unique DNS names get a 6-char suffix to avoid cross-tenant collisions.
+  keyvault:       'kv-${baseName}-${globalUniqSuffix}'
   // Storage: alphanumeric only, no hyphens, ≤24 chars
   storage:        take(replace('st${namingPrefix}${environmentName}${regionShort}', '-', ''), 24)
   cosmos:         'cosmos-${baseName}'
-  search:         'srch-${baseName}'
-  openai:         'oai-${baseName}'
+  search:         'srch-${baseName}-${globalUniqSuffix}'
+  openai:         'oai-${baseName}-${globalUniqSuffix}'
   docintel:       'di-${baseName}'
-  apim:           'apim-${baseName}'
+  apim:           'apim-${baseName}-${globalUniqSuffix}'
   acaEnv:         'acae-${baseName}'
   acaApi:         'aca-api-${baseName}'
   acaIngest:      'aca-ingest-${baseName}'
@@ -457,7 +468,7 @@ module search 'modules/search/main.bicep' = {
   name: 'search'
   scope: rg
   params: {
-    location:                     location
+    location:                     empty(searchLocation) ? location : searchLocation
     tags:                         tags
     name:                         names.search
     peSubnetId:                   network.outputs.snetPeId
@@ -621,3 +632,15 @@ output uiUrl string = 'https://${containerapps.outputs.webAppFqdn}'
 // API Gateway -----------------------------------------------------------------
 output apimGatewayUrl  string = apim.outputs.gatewayUrl
 output apimResourceId  string = apim.outputs.resourceId
+
+// =============================================================================
+// azd-convention aliases (UPPERCASE) — required by `azd deploy` + azure.yaml
+// `${WEB_APP_NAME}` / `${API_APP_NAME}` / `${INGEST_JOB_NAME}` token expansion.
+// `AZURE_RESOURCE_GROUP` is azd's canonical RG lookup key.
+// =============================================================================
+output AZURE_RESOURCE_GROUP string = rg.name
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = registry.outputs.acrLoginServer
+output AZURE_CONTAINER_REGISTRY_NAME     string = registry.outputs.acrName
+output WEB_APP_NAME    string = containerapps.outputs.webAppName
+output API_APP_NAME    string = containerapps.outputs.apiAppName
+output INGEST_JOB_NAME string = containerapps.outputs.ingestJobName

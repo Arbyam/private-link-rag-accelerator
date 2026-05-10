@@ -73,15 +73,17 @@ runcmd:
 '''
 
 // -----------------------------------------------------------------------------
-// NIC — single dynamic private IP into snet-pe, no public IP, accelerated
-// networking enabled (B2s supports it).
+// NIC — single dynamic private IP into snet-pe, no public IP. Accelerated
+// networking is OFF: Standard_B2s (the budget-plan default for this jumpbox)
+// is a burstable SKU and does NOT support accelerated networking. Bumping to
+// Dsv4/Dsv5 would re-enable it but doubles idle cost.
 // -----------------------------------------------------------------------------
 resource nic 'Microsoft.Network/networkInterfaces@2024-05-01' = {
   name: 'nic-${name}'
   location: location
   tags: tags
   properties: {
-    enableAcceleratedNetworking: true
+    enableAcceleratedNetworking: false
     ipConfigurations: [
       {
         name: 'ipconfig1'

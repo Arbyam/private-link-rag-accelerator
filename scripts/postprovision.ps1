@@ -150,6 +150,11 @@ function Invoke-EnsureSearchIndex {
     } catch {
         $status = $null
         if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+        if ($status -eq 403) {
+            Write-Warn "AI Search returned 403 — running outside the VNet, skipping kb-index step (deploy from jumpbox or runner inside VNet to seed the index)"
+            $script:summary['kb-index'] = 'skipped (403 — outside VNet)'
+            return
+        }
         if ($status -ne 404) {
             throw "Unexpected error probing kb-index ($status): $($_.Exception.Message)"
         }
@@ -237,6 +242,10 @@ function Invoke-SeedSamples {
             if ($stderrText -match 'BlobAlreadyExists' -or $stderrText -match 'already exists') {
                 $skipped++
                 Write-Info "  $blobName already present — skipping"
+            } elseif ($stderrText -match 'blocked by network rules' -or $stderrText -match 'AuthorizationFailure' -or $stderrText -match 'PublicAccessNotPermitted') {
+                Write-Warn "  Storage blocked by network rules — running outside VNet, skipping sample seeding (run from jumpbox/runner inside VNet to seed)"
+                $script:summary['sample-seeding'] = 'skipped (blocked — outside VNet)'
+                return
             } else {
                 throw "Failed to upload '$blobName' to $storageAccount/$corpusContainer`: $stderrText"
             }
