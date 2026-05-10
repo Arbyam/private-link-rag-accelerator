@@ -30,7 +30,7 @@ export function CitationChip({ citation, index, onActivate, className }: Citatio
   };
 
   const label = getDocumentLabel(citation);
-  const ariaLabel = `Citation ${index}: ${label}, page ${citation.page}`;
+  const ariaLabel = `Citation ${index}: ${label}${citation.page ? `, page ${citation.page}` : ''}`;
 
   return (
     <TooltipProvider delayDuration={200}>

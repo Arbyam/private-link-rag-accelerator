@@ -85,7 +85,16 @@ export function MessageBubble({
       className={cn('flex w-full', isUser ? 'justify-end' : 'justify-start', className)}
       data-role={role}
     >
-      <div
+      <article
+        aria-label={
+          isUser
+            ? 'Your message'
+            : isSystem
+              ? 'System message'
+              : isStreaming
+                ? 'Assistant response, streaming'
+                : 'Assistant response'
+        }
         className={cn(
           'max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
           isUser && 'bg-[var(--accent)] text-[var(--accent-foreground)] rounded-br-sm',
@@ -93,14 +102,13 @@ export function MessageBubble({
           isSystem &&
             'border border-dashed border-[var(--border)] bg-transparent text-[var(--muted-foreground)] italic'
         )}
-        aria-live={role === 'assistant' && isStreaming ? 'polite' : undefined}
       >
         <div>
           {body}
           {isStreaming ? (
             <span
-              aria-label="Assistant is typing"
-              className="ml-1 inline-block h-2 w-2 animate-pulse rounded-full bg-current align-middle"
+              aria-hidden="true"
+              className="ml-1 inline-block h-2 w-2 animate-pulse motion-reduce:animate-none rounded-full bg-current align-middle"
             />
           ) : null}
         </div>
@@ -119,7 +127,7 @@ export function MessageBubble({
             })}
           </div>
         ) : null}
-      </div>
+      </article>
     </div>
   );
 }

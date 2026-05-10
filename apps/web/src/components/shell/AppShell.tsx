@@ -21,6 +21,7 @@ import { signOut } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ConversationList } from './ConversationList';
+import { AnnouncerProvider } from './LiveRegion';
 
 export interface AppShellProps {
   children: ReactNode;
@@ -41,8 +42,12 @@ export function AppShell({ children, conversations, user }: AppShellProps) {
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
-      <aside
+    <AnnouncerProvider>
+      <a href="#main" className="skip-link">
+        Skip to main content
+      </a>
+      <div className="flex h-screen w-full overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
+        <aside
         aria-label="Application sidebar"
         className="flex w-[280px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--muted)]/40"
       >
@@ -90,7 +95,14 @@ export function AppShell({ children, conversations, user }: AppShellProps) {
         </div>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">{children}</section>
-    </div>
+        <section
+          id="main"
+          tabIndex={-1}
+          className="flex min-w-0 flex-1 flex-col overflow-hidden focus:outline-none"
+        >
+          {children}
+        </section>
+      </div>
+    </AnnouncerProvider>
   );
 }
