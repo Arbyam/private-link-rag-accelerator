@@ -65,6 +65,13 @@ module registry 'br/public:avm/res/container-registry/registry:0.12.1' = {
     acrAdminUserEnabled: false
     anonymousPullEnabled: false
 
+    // --- Zone redundancy explicitly disabled ---
+    // Premium ACR in multi-AZ regions (eastus2, etc.) defaults to zone-redundant,
+    // which is incompatible with soft-delete (Azure rejects the combination).
+    // Phase 2a v3 budget plan locks ZR off; revisit for prod via main.bicep
+    // enableZoneRedundancy when adding ZR variants.
+    zoneRedundancy: 'Disabled'
+
     // --- Data protection ---
     softDeletePolicyStatus: 'enabled'
     softDeletePolicyDays: softDeleteRetentionDays
@@ -86,36 +93,20 @@ module registry 'br/public:avm/res/container-registry/registry:0.12.1' = {
         tags: tags
       }
     ]
+
+    // --- AcrPull → per-app UAMIs (T029) ---
+    // Use AVM's built-in roleAssignments parameter; it resolves the friendly
+    // role name and emits the assignment as a child of the registry resource.
+    // This avoids the `existing` + standalone Microsoft.Authorization/roleAssignments
+    // indirection that previously failed with `RoleDefinitionDoesNotExist` when
+    // the assignment beat the registry's resource graph propagation.
+    roleAssignments: [for principalId in acrPullPrincipalIds: {
+      roleDefinitionIdOrName: 'AcrPull'
+      principalId: principalId
+      principalType: 'ServicePrincipal'
+    }]
   }
 }
-
-// =============================================================================
-// RBAC — AcrPull to per-app UAMIs (T029 / PR-O)
-// =============================================================================
-// Built-in role IDs are subscription-scoped. The role assignment itself is
-// scoped to the registry resource, so each app MI can pull only from THIS ACR.
-// =============================================================================
-var roleAcrPull = subscriptionResourceId(
-  'Microsoft.Authorization/roleDefinitions',
-  '7f951dda-4ed3-11e8-95a1-9c5dac3a2c3e'
-)
-
-resource acrExisting 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
-  name: acrName
-  dependsOn: [
-    registry
-  ]
-}
-
-resource raAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in acrPullPrincipalIds: {
-  scope: acrExisting
-  name: guid(acrExisting.id, principalId, 'AcrPull')
-  properties: {
-    principalId: principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: roleAcrPull
-  }
-}]
 
 // =============================================================================
 // Outputs — consumed by PR-O (T029/T030) wiring layer:

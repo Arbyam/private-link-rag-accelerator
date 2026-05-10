@@ -190,6 +190,13 @@ var regionShort = regionShortMap[?location] ?? location
 // Base token shared by most resource names
 var baseName = '${namingPrefix}-${environmentName}-${regionShort}'
 
+// Short deterministic suffix derived from the subscription + base name. Used to
+// disambiguate globally-unique DNS names (Key Vault, Azure OpenAI subdomain,
+// APIM gateway, Cognitive Search) so the same accelerator can deploy on
+// subscriptions where another tenant happens to own `<name>.<service>.azure.com`.
+// Length 6 keeps every resulting name well under each service's max length.
+var globalUniqSuffix = take(uniqueString(subscription().subscriptionId, baseName), 6)
+
 // Deterministic resource name map (one source of truth — no naming scattered across modules)
 var names = {
   resourceGroup:  'rg-${baseName}'
@@ -207,14 +214,15 @@ var names = {
   ampls:          'ampls-${baseName}'
   // ACR: alphanumeric only, no hyphens
   acr:            replace('acr${namingPrefix}${environmentName}${regionShort}', '-', '')
-  keyvault:       'kv-${baseName}'
+  // Globally-unique DNS names get a 6-char suffix to avoid cross-tenant collisions.
+  keyvault:       'kv-${baseName}-${globalUniqSuffix}'
   // Storage: alphanumeric only, no hyphens, ≤24 chars
   storage:        take(replace('st${namingPrefix}${environmentName}${regionShort}', '-', ''), 24)
   cosmos:         'cosmos-${baseName}'
-  search:         'srch-${baseName}'
-  openai:         'oai-${baseName}'
+  search:         'srch-${baseName}-${globalUniqSuffix}'
+  openai:         'oai-${baseName}-${globalUniqSuffix}'
   docintel:       'di-${baseName}'
-  apim:           'apim-${baseName}'
+  apim:           'apim-${baseName}-${globalUniqSuffix}'
   acaEnv:         'acae-${baseName}'
   acaApi:         'aca-api-${baseName}'
   acaIngest:      'aca-ingest-${baseName}'
